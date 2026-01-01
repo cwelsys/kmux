@@ -21,6 +21,11 @@ var detachCmd = &cobra.Command{
 			return fmt.Errorf("not in a kmux session (KMUX_SESSION not set)")
 		}
 
+		// Validate session name
+		if err := store.ValidateSessionName(sessionName); err != nil {
+			return fmt.Errorf("invalid session name: %w", err)
+		}
+
 		st := store.DefaultStore()
 		k := kitty.NewClient()
 
@@ -39,11 +44,10 @@ var detachCmd = &cobra.Command{
 		}
 
 		// Close all tabs in current OS window (zmx sessions stay alive)
-		if len(state) > 0 {
+		if len(state) > 0 && len(state[0].Tabs) > 0 {
 			for _, tab := range state[0].Tabs {
-				if err := k.CloseTab(tab.ID); err != nil {
-					continue // Ignore errors (might be closing self)
-				}
+				// Ignore errors - might be closing self or tab already gone
+				_ = k.CloseTab(tab.ID)
 			}
 		}
 
