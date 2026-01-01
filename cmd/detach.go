@@ -13,7 +13,7 @@ import (
 var detachCmd = &cobra.Command{
 	Use:   "detach",
 	Short: "Detach from current session",
-	Long:  "Save current session state and close all windows.",
+	Long:  "Save current session state and close session windows.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Get session name from env
 		sessionName := os.Getenv("KMUX_SESSION")
@@ -35,7 +35,7 @@ var detachCmd = &cobra.Command{
 			return fmt.Errorf("get kitty state: %w", err)
 		}
 
-		// Derive session from state
+		// Derive session from state (only windows belonging to this session)
 		session := manager.DeriveSession(sessionName, state)
 
 		// Save session
@@ -43,11 +43,15 @@ var detachCmd = &cobra.Command{
 			return fmt.Errorf("save session: %w", err)
 		}
 
-		// Close all tabs in current OS window (zmx sessions stay alive)
-		if len(state) > 0 && len(state[0].Tabs) > 0 {
+		// Close only windows belonging to this session (identified by KMUX_SESSION env)
+		if len(state) > 0 {
 			for _, tab := range state[0].Tabs {
-				// Ignore errors - might be closing self or tab already gone
-				_ = k.CloseTab(tab.ID)
+				for _, win := range tab.Windows {
+					if win.Env["KMUX_SESSION"] == sessionName {
+						// Close this window (zmx session stays alive)
+						_ = k.CloseWindow(win.ID)
+					}
+				}
 			}
 		}
 

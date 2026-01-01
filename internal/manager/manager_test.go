@@ -23,6 +23,7 @@ func TestDeriveSession(t *testing.T) {
 							ID:       1,
 							IsActive: true,
 							CWD:      "/home/user/project",
+							Env:      map[string]string{"KMUX_SESSION": "myproject"},
 							ForegroundProcesses: []kitty.ForegroundProcess{
 								{Cmdline: []string{"nvim", "."}},
 							},
@@ -30,6 +31,7 @@ func TestDeriveSession(t *testing.T) {
 						{
 							ID:  2,
 							CWD: "/home/user/project",
+							Env: map[string]string{"KMUX_SESSION": "myproject"},
 							ForegroundProcesses: []kitty.ForegroundProcess{
 								{Cmdline: []string{"/bin/zsh"}},
 							},
