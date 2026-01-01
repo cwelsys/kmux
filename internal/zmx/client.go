@@ -54,6 +54,9 @@ func (c *Client) List() ([]string, error) {
 
 // Kill terminates a zmx session.
 func (c *Client) Kill(name string) error {
+	if name == "" {
+		return fmt.Errorf("zmx kill: session name is required")
+	}
 	cmd := exec.Command("zmx", "kill", name)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
@@ -67,6 +70,9 @@ func (c *Client) Kill(name string) error {
 // AttachCmd returns the command to attach to a zmx session.
 // This is used to construct the command passed to kitty launch.
 func AttachCmd(sessionName string, cmd ...string) []string {
+	if sessionName == "" {
+		return nil
+	}
 	args := []string{"zmx", "attach", sessionName}
 	if len(cmd) > 0 {
 		args = append(args, cmd...)
