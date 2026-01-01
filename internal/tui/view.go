@@ -18,6 +18,11 @@ func (m Model) View() string {
 		return fmt.Sprintf("Error: %v\n\nPress q to quit.", m.err)
 	}
 
+	// Wait for window size before rendering
+	if m.width == 0 || m.height == 0 {
+		return "Loading..."
+	}
+
 	if m.showHelp {
 		return m.viewHelp()
 	}
