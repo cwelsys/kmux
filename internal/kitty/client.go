@@ -85,7 +85,9 @@ func (c *Client) Launch(opts LaunchOpts) (int, error) {
 
 	// Parse window ID from output
 	var id int
-	fmt.Sscanf(stdout.String(), "%d", &id)
+	if n, _ := fmt.Sscanf(stdout.String(), "%d", &id); n != 1 {
+		return 0, fmt.Errorf("kitty @ launch: unexpected output: %q", stdout.String())
+	}
 	return id, nil
 }
 
