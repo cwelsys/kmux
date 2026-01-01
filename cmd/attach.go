@@ -56,6 +56,7 @@ var attachCmd = &cobra.Command{
 		session.ZmxSessions = nil
 
 		// Create windows in kitty
+		var firstWindowID int
 		for tabIdx, tab := range session.Tabs {
 			for winIdx, win := range tab.Windows {
 				zmxName := session.ZmxSessionName(tabIdx, winIdx)
@@ -74,13 +75,26 @@ var attachCmd = &cobra.Command{
 					Env:   map[string]string{"KMUX_SESSION": name},
 				}
 
-				_, err := k.Launch(opts)
+				windowID, err := k.Launch(opts)
 				if err != nil {
 					return fmt.Errorf("launch window: %w", err)
 				}
 
+				// Remember first window to focus later
+				if tabIdx == 0 && winIdx == 0 {
+					firstWindowID = windowID
+				}
+
 				// Track zmx session
 				session.ZmxSessions = append(session.ZmxSessions, zmxName)
+			}
+		}
+
+		// Focus the first window of the session
+		if firstWindowID > 0 {
+			if err := k.FocusWindow(firstWindowID); err != nil {
+				// Non-fatal - session is created, just not focused
+				fmt.Printf("warning: could not focus window: %v\n", err)
 			}
 		}
 

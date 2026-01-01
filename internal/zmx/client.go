@@ -74,8 +74,11 @@ func AttachCmd(sessionName string, cmd ...string) []string {
 		return nil
 	}
 	args := []string{"zmx", "attach", sessionName}
-	if len(cmd) > 0 {
-		args = append(args, cmd...)
+	// Only append non-empty command strings
+	for _, c := range cmd {
+		if c != "" {
+			args = append(args, c)
+		}
 	}
 	return args
 }

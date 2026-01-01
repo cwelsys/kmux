@@ -105,6 +105,24 @@ type LaunchOpts struct {
 	Env      map[string]string // Environment variables to pass to launched window
 }
 
+// FocusWindow focuses a window by ID.
+func (c *Client) FocusWindow(id int) error {
+	args := []string{"@"}
+	if c.socketPath != "" {
+		args = append(args, "--to", "unix:"+c.socketPath)
+	}
+	args = append(args, "focus-window", "--match", fmt.Sprintf("id:%d", id))
+
+	cmd := exec.Command("kitty", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("kitty @ focus-window: %w: %s", err, stderr.String())
+	}
+	return nil
+}
+
 // CloseWindow closes a window by ID.
 func (c *Client) CloseWindow(id int) error {
 	args := []string{"@"}
