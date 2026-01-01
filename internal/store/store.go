@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/cwel/kmux/internal/model"
 )
@@ -23,7 +24,12 @@ func New(baseDir string) *Store {
 func DefaultStore() *Store {
 	dataDir := os.Getenv("XDG_DATA_HOME")
 	if dataDir == "" {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			// Fallback to empty path if we can't get home directory
+			// This will cause operations to fail with clear errors
+			return New("")
+		}
 		dataDir = filepath.Join(home, ".local", "share")
 	}
 	return New(filepath.Join(dataDir, "kmux"))
@@ -39,8 +45,22 @@ func (s *Store) sessionPath(name string) string {
 	return filepath.Join(s.sessionsDir(), name+".json")
 }
 
+// validateSessionName checks if a session name is valid.
+// Session names must not be empty, must not contain path separators or special characters,
+// and must not be "." or "..".
+func validateSessionName(name string) error {
+	if name == "" || strings.ContainsAny(name, "/\\:*?\"<>|") || name == "." || name == ".." {
+		return fmt.Errorf("invalid session name: %q", name)
+	}
+	return nil
+}
+
 // SaveSession saves a session to disk.
 func (s *Store) SaveSession(session *model.Session) error {
+	if err := validateSessionName(session.Name); err != nil {
+		return err
+	}
+
 	dir := s.sessionsDir()
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("create sessions dir: %w", err)
@@ -52,8 +72,13 @@ func (s *Store) SaveSession(session *model.Session) error {
 	}
 
 	path := s.sessionPath(session.Name)
-	if err := os.WriteFile(path, data, 0644); err != nil {
-		return fmt.Errorf("write session file: %w", err)
+	tmpPath := path + ".tmp"
+	if err := os.WriteFile(tmpPath, data, 0644); err != nil {
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("rename session file: %w", err)
 	}
 
 	return nil
@@ -61,6 +86,10 @@ func (s *Store) SaveSession(session *model.Session) error {
 
 // LoadSession loads a session from disk.
 func (s *Store) LoadSession(name string) (*model.Session, error) {
+	if err := validateSessionName(name); err != nil {
+		return nil, err
+	}
+
 	path := s.sessionPath(name)
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -97,6 +126,10 @@ func (s *Store) ListSessions() ([]string, error) {
 
 // DeleteSession removes a session file.
 func (s *Store) DeleteSession(name string) error {
+	if err := validateSessionName(name); err != nil {
+		return err
+	}
+
 	path := s.sessionPath(name)
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("remove session file: %w", err)
