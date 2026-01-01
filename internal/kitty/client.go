@@ -70,6 +70,10 @@ func (c *Client) Launch(opts LaunchOpts) (int, error) {
 	if opts.Location != "" {
 		args = append(args, "--location", opts.Location)
 	}
+	// Add environment variables
+	for key, val := range opts.Env {
+		args = append(args, "--env", key+"="+val)
+	}
 	if len(opts.Cmd) > 0 {
 		args = append(args, opts.Cmd...)
 	}
@@ -93,11 +97,12 @@ func (c *Client) Launch(opts LaunchOpts) (int, error) {
 
 // LaunchOpts specifies options for launching a new window.
 type LaunchOpts struct {
-	Type     string   // "window", "tab", "os-window"
+	Type     string            // "window", "tab", "os-window"
 	CWD      string
 	Title    string
-	Location string   // "first", "after", "before", "neighbor", "last", "vsplit", "hsplit"
+	Location string            // "first", "after", "before", "neighbor", "last", "vsplit", "hsplit"
 	Cmd      []string
+	Env      map[string]string // Environment variables to pass to launched window
 }
 
 // CloseWindow closes a window by ID.

@@ -71,6 +71,7 @@ var attachCmd = &cobra.Command{
 					CWD:   win.CWD,
 					Title: tab.Title,
 					Cmd:   zmxCmd,
+					Env:   map[string]string{"KMUX_SESSION": name},
 				}
 
 				_, err := k.Launch(opts)
