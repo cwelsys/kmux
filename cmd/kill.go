@@ -37,11 +37,16 @@ var killCmd = &cobra.Command{
 		}
 
 		// Also kill any running zmx sessions matching the pattern
-		running, _ := z.List()
+		running, err := z.List()
+		if err != nil {
+			fmt.Printf("warning: failed to list running zmx sessions: %v\n", err)
+		}
 		prefix := name + "."
 		for _, r := range running {
 			if strings.HasPrefix(r, prefix) {
-				_ = z.Kill(r)
+				if err := z.Kill(r); err != nil {
+					fmt.Printf("warning: failed to kill zmx session %s: %v\n", r, err)
+				}
 			}
 		}
 
