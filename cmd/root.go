@@ -11,9 +11,8 @@ var rootCmd = &cobra.Command{
 	Use:   "kmux",
 	Short: "Session management for kitty + zmx",
 	Long:  "kmux provides tmux-like session persistence using kitty for window management and zmx for process persistence.",
-	Run: func(cmd *cobra.Command, args []string) {
-		// Default action: show help (TUI comes later)
-		cmd.Help()
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return runTUI()
 	},
 }
 
