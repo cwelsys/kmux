@@ -20,6 +20,11 @@ var attachCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
+		// Validate session name early
+		if err := store.ValidateSessionName(name); err != nil {
+			return err
+		}
+
 		st := store.DefaultStore()
 		k := kitty.NewClient()
 
@@ -27,7 +32,10 @@ var attachCmd = &cobra.Command{
 		session, err := st.LoadSession(name)
 		if err != nil {
 			// Create new session
-			cwd, _ := os.Getwd()
+			cwd, err := os.Getwd()
+			if err != nil {
+				return fmt.Errorf("get working directory: %w", err)
+			}
 			session = &model.Session{
 				Name:    name,
 				Host:    "local",
@@ -43,6 +51,9 @@ var attachCmd = &cobra.Command{
 				},
 			}
 		}
+
+		// Clear ZmxSessions before rebuilding to avoid duplicates
+		session.ZmxSessions = nil
 
 		// Create windows in kitty
 		for tabIdx, tab := range session.Tabs {

@@ -45,14 +45,20 @@ func (s *Store) sessionPath(name string) string {
 	return filepath.Join(s.sessionsDir(), name+".json")
 }
 
-// validateSessionName checks if a session name is valid.
+// ValidateSessionName checks if a session name is valid.
 // Session names must not be empty, must not contain path separators or special characters,
 // and must not be "." or "..".
-func validateSessionName(name string) error {
+func ValidateSessionName(name string) error {
 	if name == "" || strings.ContainsAny(name, "/\\:*?\"<>|") || name == "." || name == ".." {
 		return fmt.Errorf("invalid session name: %q", name)
 	}
 	return nil
+}
+
+// validateSessionName is a deprecated alias for ValidateSessionName.
+// Kept for internal backward compatibility.
+func validateSessionName(name string) error {
+	return ValidateSessionName(name)
 }
 
 // SaveSession saves a session to disk.
