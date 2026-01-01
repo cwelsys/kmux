@@ -5,10 +5,10 @@ import (
 )
 
 func TestParseList(t *testing.T) {
-	// Sample zmx list output
-	output := `myproject.0.0
-myproject.0.1
-work.0.0`
+	// Actual zmx list output format
+	output := `session_name=myproject.0.0	pid=1234	clients=1
+session_name=myproject.0.1	pid=1235	clients=0
+session_name=work.0.0	pid=1236	clients=1`
 
 	sessions := ParseList(output)
 

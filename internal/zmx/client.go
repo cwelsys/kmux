@@ -16,6 +16,7 @@ func NewClient() *Client {
 }
 
 // ParseList parses output from `zmx list`.
+// Format: session_name=NAME\tpid=PID\tclients=N
 func ParseList(output string) []string {
 	output = strings.TrimSpace(output)
 	if output == "" || strings.Contains(output, "no sessions found") {
@@ -26,8 +27,18 @@ func ParseList(output string) []string {
 	var sessions []string
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if line != "" {
-			sessions = append(sessions, line)
+		if line == "" {
+			continue
+		}
+		// Extract session name from "session_name=NAME\t..."
+		if strings.HasPrefix(line, "session_name=") {
+			parts := strings.Split(line, "\t")
+			if len(parts) > 0 {
+				name := strings.TrimPrefix(parts[0], "session_name=")
+				if name != "" {
+					sessions = append(sessions, name)
+				}
+			}
 		}
 	}
 	return sessions
