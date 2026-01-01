@@ -121,3 +121,146 @@ func (m Model) SelectedSession() string {
 func (m Model) Action() string {
 	return m.action
 }
+
+// View implements tea.Model.
+func (m Model) View() string {
+	// TODO: implement in next task
+	return ""
+}
+
+// Update implements tea.Model.
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.KeyMsg:
+		return m.handleKey(msg)
+
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		return m, nil
+
+	case sessionsLoadedMsg:
+		m.sessions = msg.sessions
+		return m, nil
+
+	case errMsg:
+		m.err = msg.err
+		return m, nil
+	}
+
+	// Handle text input in filter mode
+	if m.filterMode {
+		var cmd tea.Cmd
+		m.filterInput, cmd = m.filterInput.Update(msg)
+		return m, cmd
+	}
+
+	return m, nil
+}
+
+func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Global keys
+	switch msg.String() {
+	case "ctrl+c", "q":
+		if m.confirmKill || m.showHelp || m.filterMode {
+			m.confirmKill = false
+			m.showHelp = false
+			m.filterMode = false
+			m.filterInput.Blur()
+			return m, nil
+		}
+		m.quitting = true
+		return m, tea.Quit
+
+	case "esc":
+		if m.confirmKill || m.showHelp || m.filterMode {
+			m.confirmKill = false
+			m.showHelp = false
+			m.filterMode = false
+			m.filterInput.Blur()
+			return m, nil
+		}
+		m.quitting = true
+		return m, tea.Quit
+
+	case "?":
+		if !m.filterMode && !m.confirmKill {
+			m.showHelp = !m.showHelp
+		}
+		return m, nil
+	}
+
+	// Don't process other keys in overlay modes
+	if m.showHelp {
+		return m, nil
+	}
+
+	if m.confirmKill {
+		return m.handleConfirmKill(msg)
+	}
+
+	if m.filterMode {
+		return m.handleFilterMode(msg)
+	}
+
+	// Normal mode navigation
+	switch msg.String() {
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case "down", "j":
+		if m.cursor < len(m.sessions)-1 {
+			m.cursor++
+		}
+	case "enter":
+		if len(m.sessions) > 0 {
+			m.action = "attach"
+			m.quitting = true
+			return m, tea.Quit
+		}
+	case "d":
+		if len(m.sessions) > 0 {
+			m.confirmKill = true
+		}
+	case "r":
+		// TODO: rename functionality
+	case "/":
+		m.filterMode = true
+		m.filterInput.Focus()
+		return m, textinput.Blink
+	}
+
+	return m, nil
+}
+
+func (m Model) handleConfirmKill(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "y", "Y":
+		m.action = "kill"
+		m.quitting = true
+		return m, tea.Quit
+	case "n", "N", "esc":
+		m.confirmKill = false
+	}
+	return m, nil
+}
+
+func (m Model) handleFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.filterMode = false
+		m.filterInput.Blur()
+		// Apply filter - for now just exit filter mode
+		// TODO: filter sessions list
+	case "esc":
+		m.filterMode = false
+		m.filterInput.Blur()
+		m.filterInput.SetValue("")
+	default:
+		var cmd tea.Cmd
+		m.filterInput, cmd = m.filterInput.Update(msg)
+		return m, cmd
+	}
+	return m, nil
+}
