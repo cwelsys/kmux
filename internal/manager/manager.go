@@ -91,7 +91,7 @@ func extractCommand(win kitty.Window) string {
 
 	// Filter out shells and zmx attach
 	cmd := fg.Cmdline[0]
-	if isShell(cmd) || cmd == "zmx" {
+	if isShell(cmd) || cmd == "zmx" || strings.HasSuffix(cmd, "/zmx") {
 		return ""
 	}
 

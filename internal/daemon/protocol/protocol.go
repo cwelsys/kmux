@@ -10,6 +10,7 @@ const (
 	MethodDetach   = "detach"
 	MethodKill     = "kill"
 	MethodShutdown = "shutdown"
+	MethodSplit    = "split"
 )
 
 // Request is an RPC request.
@@ -52,6 +53,20 @@ type KillParams struct {
 type AttachResult struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
+}
+
+// SplitParams for split method.
+type SplitParams struct {
+	Session   string `json:"session"`   // KMUX_SESSION value
+	Direction string `json:"direction"` // "vertical" or "horizontal"
+	CWD       string `json:"cwd,omitempty"`
+}
+
+// SplitResult from split method.
+type SplitResult struct {
+	Success  bool   `json:"success"`
+	WindowID int    `json:"window_id"`
+	Message  string `json:"message"`
 }
 
 // SuccessResponse creates a success response with the given result.

@@ -166,3 +166,31 @@ func (c *Client) Kill(name string) error {
 	_, err = c.call(req)
 	return err
 }
+
+// Split creates a new split window in a session.
+func (c *Client) Split(session, direction, cwd string) (int, error) {
+	req, err := protocol.NewRequestWithParams(protocol.MethodSplit, c.kittySocket, protocol.SplitParams{
+		Session:   session,
+		Direction: direction,
+		CWD:       cwd,
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	resp, err := c.call(req)
+	if err != nil {
+		return 0, err
+	}
+
+	var result protocol.SplitResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return 0, fmt.Errorf("unmarshal: %w", err)
+	}
+
+	if !result.Success {
+		return 0, fmt.Errorf("split failed: %s", result.Message)
+	}
+
+	return result.WindowID, nil
+}

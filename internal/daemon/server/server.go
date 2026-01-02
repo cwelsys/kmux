@@ -167,6 +167,12 @@ func (s *Server) handleRequest(req protocol.Request) protocol.Response {
 			s.Stop()
 		}()
 		return protocol.SuccessResponse("shutting down")
+	case protocol.MethodSplit:
+		var params protocol.SplitParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return protocol.ErrorResponse(fmt.Sprintf("invalid params: %v", err))
+		}
+		return s.handleSplit(k, params)
 	default:
 		return protocol.ErrorResponse(fmt.Sprintf("unknown method: %s", req.Method))
 	}
@@ -441,6 +447,90 @@ func (s *Server) handleKill(k *kitty.Client, params protocol.KillParams) protoco
 	return protocol.SuccessResponse(protocol.AttachResult{
 		Success: true,
 		Message: fmt.Sprintf("Killed session: %s", name),
+	})
+}
+
+func (s *Server) handleSplit(k *kitty.Client, params protocol.SplitParams) protocol.Response {
+	sessionName := params.Session
+	if sessionName == "" {
+		return protocol.ErrorResponse("session name required")
+	}
+
+	// Validate direction
+	location := ""
+	switch params.Direction {
+	case "vertical", "v":
+		location = "vsplit"
+	case "horizontal", "h":
+		location = "hsplit"
+	default:
+		return protocol.ErrorResponse(fmt.Sprintf("invalid direction: %s (use 'vertical' or 'horizontal')", params.Direction))
+	}
+
+	// Get kitty state to find current tab
+	state, err := k.GetState()
+	if err != nil {
+		return protocol.ErrorResponse(fmt.Sprintf("get kitty state: %v", err))
+	}
+
+	if len(state) == 0 {
+		return protocol.ErrorResponse("no kitty windows found")
+	}
+
+	// Find the tab containing windows for this session
+	var targetTabIdx int = -1
+	var windowCount int
+	for _, osWin := range state {
+		for tabIdx, tab := range osWin.Tabs {
+			for _, win := range tab.Windows {
+				if win.Env["KMUX_SESSION"] == sessionName {
+					targetTabIdx = tabIdx
+					windowCount++
+				}
+			}
+		}
+	}
+
+	if targetTabIdx == -1 {
+		return protocol.ErrorResponse(fmt.Sprintf("no windows found for session: %s", sessionName))
+	}
+
+	// Build zmx session name: {session}.{tab}.{window}
+	zmxName := fmt.Sprintf("%s.%d.%d", sessionName, targetTabIdx, windowCount)
+	zmxCmd := zmx.AttachCmd(zmxName, "")
+
+	// CWD - use provided or default to home
+	cwd := params.CWD
+	if cwd == "" {
+		cwd, _ = os.UserHomeDir()
+	}
+
+	// Launch the split window
+	opts := kitty.LaunchOpts{
+		Type:     "window",
+		Location: location,
+		CWD:      cwd,
+		Cmd:      zmxCmd,
+		Env:      map[string]string{"KMUX_SESSION": sessionName},
+	}
+
+	windowID, err := k.Launch(opts)
+	if err != nil {
+		return protocol.ErrorResponse(fmt.Sprintf("launch split: %v", err))
+	}
+
+	// Update internal state
+	s.mu.Lock()
+	if sess, ok := s.state.Sessions[sessionName]; ok {
+		sess.Panes++
+		sess.LastSeen = time.Now()
+	}
+	s.mu.Unlock()
+
+	return protocol.SuccessResponse(protocol.SplitResult{
+		Success:  true,
+		WindowID: windowID,
+		Message:  fmt.Sprintf("Created %s split in session %s", params.Direction, sessionName),
 	})
 }
 

@@ -32,9 +32,10 @@ func traverseForRestore(node *model.SplitNode, parentSplit string, windows []mod
 	}
 
 	// Determine split type for second child
-	splitType := "hsplit"
+	// In kitty layout_state: horizontal=true means left/right (vsplit), false means top/bottom (hsplit)
+	splitType := "vsplit"
 	if !node.Horizontal {
-		splitType = "vsplit"
+		splitType = "hsplit"
 	}
 
 	// First child inherits parent's split type
