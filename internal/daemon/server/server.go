@@ -759,12 +759,8 @@ func (s *Server) pollState() {
 			sess.Status = "detached"
 			sess.LastSeen = time.Now()
 		} else {
-			// No windows, no zmx - check if save file exists
-			if _, err := s.store.LoadSession(name); err != nil {
-				delete(s.state.Sessions, name)
-			} else {
-				sess.Status = "saved"
-			}
+			// No windows, no zmx - session is gone
+			delete(s.state.Sessions, name)
 		}
 	}
 
