@@ -79,3 +79,30 @@ func (c *Client) Sessions() ([]protocol.SessionInfo, error) {
 
 	return sessions, nil
 }
+
+// Attach attaches to a session (creates if new).
+func (c *Client) Attach(name, cwd string) error {
+	req, err := protocol.NewRequestWithParams(protocol.MethodAttach, protocol.AttachParams{
+		Name: name,
+		CWD:  cwd,
+	})
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.call(req)
+	if err != nil {
+		return err
+	}
+
+	var result protocol.AttachResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+
+	if !result.Success {
+		return fmt.Errorf("attach failed: %s", result.Message)
+	}
+
+	return nil
+}

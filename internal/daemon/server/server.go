@@ -7,10 +7,12 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/cwel/kmux/internal/config"
 	"github.com/cwel/kmux/internal/daemon/protocol"
 	"github.com/cwel/kmux/internal/kitty"
+	"github.com/cwel/kmux/internal/model"
 	"github.com/cwel/kmux/internal/store"
 	"github.com/cwel/kmux/internal/zmx"
 )
@@ -112,6 +114,12 @@ func (s *Server) handleRequest(req protocol.Request) protocol.Response {
 		return protocol.SuccessResponse("pong")
 	case protocol.MethodSessions:
 		return s.handleSessions()
+	case protocol.MethodAttach:
+		var params protocol.AttachParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return protocol.ErrorResponse(fmt.Sprintf("invalid params: %v", err))
+		}
+		return s.handleAttach(params)
 	case protocol.MethodShutdown:
 		go func() {
 			s.Stop()
@@ -164,4 +172,87 @@ func (s *Server) handleSessions() protocol.Response {
 	}
 
 	return protocol.SuccessResponse(sessions)
+}
+
+func (s *Server) handleAttach(params protocol.AttachParams) protocol.Response {
+	name := params.Name
+
+	if err := store.ValidateSessionName(name); err != nil {
+		return protocol.ErrorResponse(err.Error())
+	}
+
+	// Try to load existing session
+	session, err := s.store.LoadSession(name)
+	if err != nil {
+		// Create new session
+		cwd := params.CWD
+		if cwd == "" {
+			cwd = "/"
+		}
+		session = &model.Session{
+			Name:    name,
+			Host:    "local",
+			SavedAt: time.Now(),
+			Tabs: []model.Tab{
+				{
+					Title:  name,
+					Layout: "splits",
+					Windows: []model.Window{
+						{CWD: cwd},
+					},
+				},
+			},
+		}
+	}
+
+	// Clear ZmxSessions before rebuilding
+	session.ZmxSessions = nil
+
+	// Create windows in kitty
+	var firstWindowID int
+	for tabIdx, tab := range session.Tabs {
+		for winIdx, win := range tab.Windows {
+			zmxName := session.ZmxSessionName(tabIdx, winIdx)
+			zmxCmd := zmx.AttachCmd(zmxName, win.Command)
+
+			launchType := "tab"
+			if winIdx > 0 {
+				launchType = "window"
+			}
+
+			opts := kitty.LaunchOpts{
+				Type:  launchType,
+				CWD:   win.CWD,
+				Title: tab.Title,
+				Cmd:   zmxCmd,
+				Env:   map[string]string{"KMUX_SESSION": name},
+			}
+
+			windowID, err := s.kitty.Launch(opts)
+			if err != nil {
+				return protocol.ErrorResponse(fmt.Sprintf("launch window: %v", err))
+			}
+
+			if tabIdx == 0 && winIdx == 0 {
+				firstWindowID = windowID
+			}
+
+			session.ZmxSessions = append(session.ZmxSessions, zmxName)
+		}
+	}
+
+	// Focus first window
+	if firstWindowID > 0 {
+		s.kitty.FocusWindow(firstWindowID)
+	}
+
+	// Save session
+	if err := s.store.SaveSession(session); err != nil {
+		return protocol.ErrorResponse(fmt.Sprintf("save session: %v", err))
+	}
+
+	return protocol.SuccessResponse(protocol.AttachResult{
+		Success: true,
+		Message: fmt.Sprintf("Attached to session: %s", name),
+	})
 }
