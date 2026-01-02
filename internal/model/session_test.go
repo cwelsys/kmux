@@ -52,3 +52,19 @@ func TestZmxSessionName(t *testing.T) {
 		}
 	}
 }
+
+func TestSplitNode_IsLeaf(t *testing.T) {
+	idx := 0
+	leaf := &SplitNode{WindowIdx: &idx}
+	if !leaf.IsLeaf() {
+		t.Error("expected leaf node")
+	}
+
+	branch := &SplitNode{
+		Horizontal: true,
+		Children:   [2]*SplitNode{{WindowIdx: &idx}, {WindowIdx: &idx}},
+	}
+	if branch.IsLeaf() {
+		t.Error("expected branch node")
+	}
+}

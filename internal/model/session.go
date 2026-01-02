@@ -30,6 +30,23 @@ type Window struct {
 	SplitRatio float64 `json:"split_ratio,omitempty"`
 }
 
+// SplitNode represents a node in the split tree.
+// Leaf nodes have WindowIdx set. Branch nodes have Children set.
+type SplitNode struct {
+	// Leaf node: index into Tab.Windows
+	WindowIdx *int `json:"window_idx,omitempty"`
+
+	// Branch node fields
+	Horizontal bool          `json:"horizontal,omitempty"` // true=left/right, false=top/bottom
+	Bias       float64       `json:"bias,omitempty"`       // space ratio (default 0.5)
+	Children   [2]*SplitNode `json:"children,omitempty"`   // [first, second]
+}
+
+// IsLeaf returns true if this is a leaf node (has window, no children).
+func (n *SplitNode) IsLeaf() bool {
+	return n.WindowIdx != nil
+}
+
 // ZmxSessionName returns the zmx session name for a window at the given position.
 func (s *Session) ZmxSessionName(tabIdx, winIdx int) string {
 	return s.Name + "." + strconv.Itoa(tabIdx) + "." + strconv.Itoa(winIdx)
