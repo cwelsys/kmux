@@ -646,9 +646,10 @@ func (s *Server) pollState() {
 		sess.ZmxAlive = zmxBySession[name]
 		windowIDs := kittyWindowsBySession[name]
 		sess.WindowIDs = windowIDs
-		sess.Panes = len(windowIDs)
-		if sess.Panes == 0 {
-			sess.Panes = 1 // at least 1 if saved
+
+		// Only update pane count if we have windows, otherwise keep saved value
+		if len(windowIDs) > 0 {
+			sess.Panes = len(windowIDs)
 		}
 
 		// Determine status
