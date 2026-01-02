@@ -46,3 +46,20 @@ func TestResponse_Error(t *testing.T) {
 		t.Errorf("expected nil result, got %v", resp.Result)
 	}
 }
+
+func TestSessionsParams(t *testing.T) {
+	params := SessionsParams{IncludeRestorePoints: true}
+	data, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded SessionsParams
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if !decoded.IncludeRestorePoints {
+		t.Error("IncludeRestorePoints should be true")
+	}
+}

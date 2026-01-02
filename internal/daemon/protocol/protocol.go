@@ -33,6 +33,11 @@ type SessionInfo struct {
 	Panes  int    `json:"panes"`
 }
 
+// SessionsParams for sessions method.
+type SessionsParams struct {
+	IncludeRestorePoints bool `json:"include_restore_points,omitempty"`
+}
+
 // AttachParams for attach method.
 type AttachParams struct {
 	Name string `json:"name"`
