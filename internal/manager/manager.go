@@ -38,27 +38,41 @@ func DeriveSession(name string, state kitty.KittyState) *model.Session {
 	osWin := state[0]
 
 	for _, tab := range osWin.Tabs {
-		modelTab := model.Tab{
-			Title:  tab.Title,
-			Layout: tab.Layout,
-		}
+		// Build window ID to index map for this tab
+		windowIDToIdx := make(map[int]int)
+		var sessionWindows []model.Window
 
 		for _, win := range tab.Windows {
-			// Only capture windows belonging to this session
 			if win.Env["KMUX_SESSION"] != name {
 				continue
 			}
-			modelWin := model.Window{
+			idx := len(sessionWindows)
+			windowIDToIdx[win.ID] = idx
+			sessionWindows = append(sessionWindows, model.Window{
 				CWD:     win.CWD,
 				Command: extractCommand(win),
-			}
-			modelTab.Windows = append(modelTab.Windows, modelWin)
+			})
 		}
 
-		// Only include tab if it has windows belonging to this session
-		if len(modelTab.Windows) > 0 {
-			session.Tabs = append(session.Tabs, modelTab)
+		if len(sessionWindows) == 0 {
+			continue
 		}
+
+		modelTab := model.Tab{
+			Title:   tab.Title,
+			Layout:  tab.Layout,
+			Windows: sessionWindows,
+		}
+
+		// Parse split tree if this is a splits layout with multiple windows
+		if tab.Layout == "splits" && len(sessionWindows) > 1 && tab.LayoutState.Pairs != nil {
+			splitRoot, err := kitty.PairToSplitNode(tab.LayoutState.Pairs, windowIDToIdx)
+			if err == nil {
+				modelTab.SplitRoot = splitRoot
+			}
+		}
+
+		session.Tabs = append(session.Tabs, modelTab)
 	}
 
 	return session
