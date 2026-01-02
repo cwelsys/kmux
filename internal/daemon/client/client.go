@@ -99,9 +99,17 @@ func (c *Client) Shutdown() error {
 	return err
 }
 
-// Sessions returns all sessions from the daemon.
-func (c *Client) Sessions() ([]protocol.SessionInfo, error) {
-	resp, err := c.call(protocol.NewRequest(protocol.MethodSessions, c.kittySocket))
+// Sessions returns sessions from the daemon.
+// If includeRestorePoints is true, also includes restore points (saved sessions without running zmx).
+func (c *Client) Sessions(includeRestorePoints bool) ([]protocol.SessionInfo, error) {
+	req, err := protocol.NewRequestWithParams(protocol.MethodSessions, c.kittySocket, protocol.SessionsParams{
+		IncludeRestorePoints: includeRestorePoints,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := c.call(req)
 	if err != nil {
 		return nil, err
 	}

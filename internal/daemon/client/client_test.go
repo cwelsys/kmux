@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cwel/kmux/internal/daemon/protocol"
 	"github.com/cwel/kmux/internal/daemon/server"
 	"github.com/cwel/kmux/internal/model"
 	"github.com/cwel/kmux/internal/store"
@@ -69,7 +70,7 @@ func TestClient_Sessions(t *testing.T) {
 	time.Sleep(50 * time.Millisecond)
 
 	c := New(socketPath)
-	sessions, err := c.Sessions()
+	sessions, err := c.Sessions(true) // include restore points to see saved session
 	if err != nil {
 		t.Fatalf("Sessions: %v", err)
 	}
@@ -80,4 +81,12 @@ func TestClient_Sessions(t *testing.T) {
 	if sessions[0].Name != "testsession" {
 		t.Errorf("got name %q, want testsession", sessions[0].Name)
 	}
+}
+
+func TestClient_SessionsAll(t *testing.T) {
+	// This tests the method signature exists
+	c := New("/tmp/test.sock")
+
+	// Method should exist and accept bool parameter
+	var _ func(bool) ([]protocol.SessionInfo, error) = c.Sessions
 }
