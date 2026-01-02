@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/cwel/kmux/internal/daemon/server"
+	"github.com/cwel/kmux/internal/model"
+	"github.com/cwel/kmux/internal/store"
 )
 
 func TestClient_Ping(t *testing.T) {
@@ -45,5 +47,37 @@ func TestClient_IsRunning(t *testing.T) {
 	// Now running
 	if !c.IsRunning() {
 		t.Error("IsRunning() = false after server start")
+	}
+}
+
+func TestClient_Sessions(t *testing.T) {
+	tmpDir := t.TempDir()
+	socketPath := filepath.Join(tmpDir, "test.sock")
+	dataDir := filepath.Join(tmpDir, "data")
+
+	// Create a saved session
+	st := store.New(dataDir)
+	sess := &model.Session{
+		Name: "testsession",
+		Tabs: []model.Tab{{Windows: []model.Window{{CWD: "/tmp"}}}},
+	}
+	st.SaveSession(sess)
+
+	srv := server.New(socketPath, dataDir)
+	go srv.Start()
+	defer srv.Stop()
+	time.Sleep(50 * time.Millisecond)
+
+	c := New(socketPath)
+	sessions, err := c.Sessions()
+	if err != nil {
+		t.Fatalf("Sessions: %v", err)
+	}
+
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(sessions))
+	}
+	if sessions[0].Name != "testsession" {
+		t.Errorf("got name %q, want testsession", sessions[0].Name)
 	}
 }

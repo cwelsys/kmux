@@ -110,6 +110,8 @@ func (s *Server) handleRequest(req protocol.Request) protocol.Response {
 	switch req.Method {
 	case protocol.MethodPing:
 		return protocol.SuccessResponse("pong")
+	case protocol.MethodSessions:
+		return s.handleSessions()
 	case protocol.MethodShutdown:
 		go func() {
 			s.Stop()
@@ -118,4 +120,48 @@ func (s *Server) handleRequest(req protocol.Request) protocol.Response {
 	default:
 		return protocol.ErrorResponse(fmt.Sprintf("unknown method: %s", req.Method))
 	}
+}
+
+func (s *Server) handleSessions() protocol.Response {
+	names, err := s.store.ListSessions()
+	if err != nil {
+		return protocol.ErrorResponse(fmt.Sprintf("list sessions: %v", err))
+	}
+
+	// Get running zmx sessions
+	running, _ := s.zmx.List()
+	runningSet := make(map[string]bool)
+	for _, r := range running {
+		// Extract session name from "sessionname.tab.window"
+		for i, c := range r {
+			if c == '.' {
+				runningSet[r[:i]] = true
+				break
+			}
+		}
+	}
+
+	var sessions []protocol.SessionInfo
+	for _, name := range names {
+		sess, err := s.store.LoadSession(name)
+		panes := 0
+		if err == nil {
+			for _, tab := range sess.Tabs {
+				panes += len(tab.Windows)
+			}
+		}
+
+		status := "saved"
+		if runningSet[name] {
+			status = "running"
+		}
+
+		sessions = append(sessions, protocol.SessionInfo{
+			Name:   name,
+			Status: status,
+			Panes:  panes,
+		})
+	}
+
+	return protocol.SuccessResponse(sessions)
 }

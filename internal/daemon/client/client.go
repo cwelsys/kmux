@@ -64,3 +64,18 @@ func (c *Client) Shutdown() error {
 	_, err := c.call(protocol.NewRequest(protocol.MethodShutdown))
 	return err
 }
+
+// Sessions returns all sessions from the daemon.
+func (c *Client) Sessions() ([]protocol.SessionInfo, error) {
+	resp, err := c.call(protocol.NewRequest(protocol.MethodSessions))
+	if err != nil {
+		return nil, err
+	}
+
+	var sessions []protocol.SessionInfo
+	if err := json.Unmarshal(resp.Result, &sessions); err != nil {
+		return nil, fmt.Errorf("unmarshal: %w", err)
+	}
+
+	return sessions, nil
+}
