@@ -181,7 +181,8 @@ func (s *Server) handleRequest(req protocol.Request) protocol.Response {
 	}
 }
 
-// kittyForRequest creates a kitty client for the request's socket and stores it for polling
+// kittyForRequest creates a kitty client for the request's socket and stores it for polling.
+// If the request doesn't provide a socket, uses the discovered socket.
 func (s *Server) kittyForRequest(req protocol.Request) *kitty.Client {
 	if req.KittySocket != "" {
 		// Extract path from "unix:/path/to/socket" format
@@ -200,7 +201,41 @@ func (s *Server) kittyForRequest(req protocol.Request) *kitty.Client {
 
 		return kitty.NewClientWithSocket(socket)
 	}
-	return s.kitty // fallback to stored client
+	// No socket in request - use discovered socket
+	return s.ensureKittyClient()
+}
+
+// ensureKittyClient returns a working kitty client, discovering the socket if needed.
+// Called every poll cycle to handle kitty restarts (new PID = new socket).
+func (s *Server) ensureKittyClient() *kitty.Client {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// If we have a socket, use it
+	if s.kittySocket != "" && s.kitty != nil {
+		return s.kitty
+	}
+
+	// Discover kitty socket by looking for /tmp/mykitty-*
+	matches, err := filepath.Glob("/tmp/mykitty-*")
+	if err != nil || len(matches) == 0 {
+		return nil
+	}
+
+	// Find the first valid socket
+	for _, m := range matches {
+		info, err := os.Stat(m)
+		if err != nil {
+			continue
+		}
+		if info.Mode()&os.ModeSocket != 0 {
+			s.kittySocket = m
+			s.kitty = kitty.NewClientWithSocket(m)
+			return s.kitty
+		}
+	}
+
+	return nil
 }
 
 // initState loads saved sessions and reconciles with running zmx processes
@@ -456,10 +491,11 @@ func (s *Server) handleKill(k *kitty.Client, params protocol.KillParams) protoco
 }
 
 func (s *Server) handleSplit(k *kitty.Client, params protocol.SplitParams) protocol.Response {
-	sessionName := params.Session
-	if sessionName == "" {
-		return protocol.ErrorResponse("session name required")
+	if k == nil {
+		return protocol.ErrorResponse("no kitty connection available")
 	}
+
+	sessionName := params.Session // empty = native split
 
 	// Validate direction
 	location := ""
@@ -472,7 +508,33 @@ func (s *Server) handleSplit(k *kitty.Client, params protocol.SplitParams) proto
 		return protocol.ErrorResponse(fmt.Sprintf("invalid direction: %s (use 'vertical' or 'horizontal')", params.Direction))
 	}
 
-	// Get kitty state to find current tab
+	// CWD - use provided or default to home
+	cwd := params.CWD
+	if cwd == "" {
+		cwd, _ = os.UserHomeDir()
+	}
+
+	// If no session, create a native kitty split (no zmx)
+	if sessionName == "" {
+		opts := kitty.LaunchOpts{
+			Type:     "window",
+			Location: location,
+			CWD:      cwd,
+		}
+
+		windowID, err := k.Launch(opts)
+		if err != nil {
+			return protocol.ErrorResponse(fmt.Sprintf("launch split: %v", err))
+		}
+
+		return protocol.SuccessResponse(protocol.SplitResult{
+			Success:  true,
+			WindowID: windowID,
+			Message:  fmt.Sprintf("Created native %s split", params.Direction),
+		})
+	}
+
+	// In a kmux session - create zmx-backed split
 	state, err := k.GetState()
 	if err != nil {
 		return protocol.ErrorResponse(fmt.Sprintf("get kitty state: %v", err))
@@ -504,13 +566,7 @@ func (s *Server) handleSplit(k *kitty.Client, params protocol.SplitParams) proto
 	zmxName := fmt.Sprintf("%s.%d.%d", sessionName, targetTabIdx, windowCount)
 	zmxCmd := zmx.AttachCmd(zmxName, "")
 
-	// CWD - use provided or default to home
-	cwd := params.CWD
-	if cwd == "" {
-		cwd, _ = os.UserHomeDir()
-	}
-
-	// Launch the split window
+	// Launch the split window with zmx
 	opts := kitty.LaunchOpts{
 		Type:     "window",
 		Location: location,
@@ -573,10 +629,8 @@ func (s *Server) pollState() {
 		}
 	}
 
-	// Poll kitty if we have a socket
-	s.mu.Lock()
-	kittyClient := s.kitty
-	s.mu.Unlock()
+	// Poll kitty - discover/verify socket each poll cycle
+	kittyClient := s.ensureKittyClient()
 
 	var kittyState kitty.KittyState
 	kittyWindowsBySession := make(map[string][]int) // session name -> window IDs
@@ -584,7 +638,13 @@ func (s *Server) pollState() {
 	if kittyClient != nil {
 		var err error
 		kittyState, err = kittyClient.GetState()
-		if err == nil && len(kittyState) > 0 {
+		if err != nil {
+			// Current socket failed - clear it so next poll rediscovers
+			s.mu.Lock()
+			s.kittySocket = ""
+			s.kitty = nil
+			s.mu.Unlock()
+		} else if len(kittyState) > 0 {
 			// Extract windows by KMUX_SESSION
 			for _, osWin := range kittyState {
 				for _, tab := range osWin.Tabs {
