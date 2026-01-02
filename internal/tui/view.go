@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -92,25 +91,13 @@ func (m Model) viewPreview(width, height int) string {
 		s := m.sessions[m.cursor]
 
 		b.WriteString(previewTitleStyle.Render(s.Name) + "\n")
-		b.WriteString(previewInfoStyle.Render(fmt.Sprintf("saved: %s", timeAgo(s.SavedAt))) + "\n\n")
 
-		for i, tab := range s.Tabs {
-			tabLine := fmt.Sprintf("[tab%d] %s", i, tab.Title)
-			if len(tab.Windows) > 1 {
-				var cmds []string
-				for _, w := range tab.Windows {
-					if w.Command != "" {
-						cmds = append(cmds, w.Command)
-					} else {
-						cmds = append(cmds, "shell")
-					}
-				}
-				tabLine += " │ " + strings.Join(cmds, " │ ")
-			} else if len(tab.Windows) == 1 && tab.Windows[0].Command != "" {
-				tabLine += ": " + tab.Windows[0].Command
-			}
-			b.WriteString(tabLine + "\n")
+		status := "saved"
+		if s.HasRunning {
+			status = "running"
 		}
+		b.WriteString(previewInfoStyle.Render(fmt.Sprintf("status: %s", status)) + "\n")
+		b.WriteString(previewInfoStyle.Render(fmt.Sprintf("panes: %d", s.PaneCount)) + "\n")
 	}
 
 	style := borderStyle.Width(width).Height(height)
@@ -149,18 +136,4 @@ func (m Model) viewConfirmKill(width, height int) string {
 	msg := fmt.Sprintf("Kill session '%s'?\n\n[y] yes  [n] no", name)
 	style := borderStyle.Width(40).Padding(1, 2)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, style.Render(msg))
-}
-
-func timeAgo(t time.Time) string {
-	d := time.Since(t)
-	switch {
-	case d < time.Minute:
-		return "just now"
-	case d < time.Hour:
-		return fmt.Sprintf("%dm ago", int(d.Minutes()))
-	case d < 24*time.Hour:
-		return fmt.Sprintf("%dh ago", int(d.Hours()))
-	default:
-		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
-	}
 }

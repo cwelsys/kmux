@@ -4,11 +4,19 @@ import (
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/cwel/kmux/internal/config"
+	"github.com/cwel/kmux/internal/daemon/client"
 	"github.com/cwel/kmux/internal/tui"
 )
 
 func runTUI() error {
-	m := tui.New()
+	c := client.New(config.SocketPath())
+
+	if err := c.EnsureRunning(); err != nil {
+		return fmt.Errorf("daemon: %w", err)
+	}
+
+	m := tui.New(c)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	finalModel, err := p.Run()
@@ -16,7 +24,6 @@ func runTUI() error {
 		return fmt.Errorf("run TUI: %w", err)
 	}
 
-	// Handle action after TUI exits
 	result := finalModel.(tui.Model)
 	session := result.SelectedSession()
 	action := result.Action()
@@ -27,24 +34,10 @@ func runTUI() error {
 
 	switch action {
 	case "attach":
-		return runAttach(session)
+		return c.Attach(session, "")
 	case "kill":
-		return runKill(session)
+		return c.Kill(session)
 	}
 
 	return nil
-}
-
-func runAttach(name string) error {
-	// Re-run attach logic (same as attachCmd.RunE)
-	// This avoids circular dependency - we call the command directly
-	args := []string{name}
-	attachCmd.SetArgs(args)
-	return attachCmd.RunE(attachCmd, args)
-}
-
-func runKill(name string) error {
-	args := []string{name}
-	killCmd.SetArgs(args)
-	return killCmd.RunE(killCmd, args)
 }

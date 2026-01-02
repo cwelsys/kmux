@@ -7,7 +7,7 @@ import (
 )
 
 func TestModel_Navigation(t *testing.T) {
-	m := New()
+	m := New(nil)
 	m.sessions = []SessionInfo{
 		{Name: "session1"},
 		{Name: "session2"},
@@ -49,7 +49,7 @@ func TestModel_Navigation(t *testing.T) {
 }
 
 func TestModel_SelectedSession(t *testing.T) {
-	m := New()
+	m := New(nil)
 	m.sessions = []SessionInfo{
 		{Name: "first"},
 		{Name: "second"},
@@ -62,14 +62,14 @@ func TestModel_SelectedSession(t *testing.T) {
 }
 
 func TestModel_SelectedSession_Empty(t *testing.T) {
-	m := New()
+	m := New(nil)
 	if got := m.SelectedSession(); got != "" {
 		t.Errorf("expected empty string, got %q", got)
 	}
 }
 
 func TestModel_HelpToggle(t *testing.T) {
-	m := New()
+	m := New(nil)
 
 	if m.showHelp {
 		t.Error("expected showHelp false initially")
@@ -89,7 +89,7 @@ func TestModel_HelpToggle(t *testing.T) {
 }
 
 func TestModel_ConfirmKill(t *testing.T) {
-	m := New()
+	m := New(nil)
 	m.sessions = []SessionInfo{{Name: "test"}}
 
 	// Press d to trigger confirm
@@ -108,7 +108,7 @@ func TestModel_ConfirmKill(t *testing.T) {
 }
 
 func TestModel_AttachAction(t *testing.T) {
-	m := New()
+	m := New(nil)
 	m.sessions = []SessionInfo{{Name: "test"}}
 
 	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -122,24 +122,5 @@ func TestModel_AttachAction(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("expected quit command")
-	}
-}
-
-func TestExtractSessionName(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"project.0.0", "project"},
-		{"my-session.1.2", "my-session"},
-		{"simple", "simple"},
-		{"", ""},
-	}
-
-	for _, tc := range tests {
-		got := extractSessionName(tc.input)
-		if got != tc.expected {
-			t.Errorf("extractSessionName(%q) = %q, expected %q", tc.input, got, tc.expected)
-		}
 	}
 }

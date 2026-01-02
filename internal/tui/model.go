@@ -1,22 +1,16 @@
 package tui
 
 import (
-	"time"
-
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/cwel/kmux/internal/model"
-	"github.com/cwel/kmux/internal/store"
-	"github.com/cwel/kmux/internal/zmx"
+	"github.com/cwel/kmux/internal/daemon/client"
 )
 
 // SessionInfo holds display information about a session.
 type SessionInfo struct {
 	Name       string
-	SavedAt    time.Time
 	PaneCount  int
 	HasRunning bool
-	Tabs       []model.Tab
 }
 
 // Model is the bubbletea model for the TUI.
@@ -32,20 +26,18 @@ type Model struct {
 	err         error
 	quitting    bool
 	action      string // "attach" or "kill" - set when exiting to perform action
-	store       *store.Store
-	zmx         *zmx.Client
+	client      *client.Client
 }
 
 // New creates a new TUI model.
-func New() Model {
+func New(c *client.Client) Model {
 	ti := textinput.New()
 	ti.Placeholder = "filter..."
 	ti.CharLimit = 50
 
 	return Model{
 		filterInput: ti,
-		store:       store.DefaultStore(),
-		zmx:         zmx.NewClient(),
+		client:      c,
 	}
 }
 
@@ -54,55 +46,23 @@ func (m Model) Init() tea.Cmd {
 	return m.loadSessions
 }
 
-// loadSessions loads session data from store and zmx.
+// loadSessions loads session data from daemon.
 func (m Model) loadSessions() tea.Msg {
-	saved, err := m.store.ListSessions()
+	sessions, err := m.client.Sessions()
 	if err != nil {
 		return errMsg{err}
 	}
 
-	running, _ := m.zmx.List() // ignore error, just means no running sessions
-	runningSet := make(map[string]bool)
-	for _, r := range running {
-		// Extract session name from "session.tab.window"
-		name := extractSessionName(r)
-		if name != "" {
-			runningSet[name] = true
-		}
-	}
-
-	var sessions []SessionInfo
-	for _, name := range saved {
-		sess, err := m.store.LoadSession(name)
-		if err != nil {
-			continue
-		}
-
-		panes := 0
-		for _, tab := range sess.Tabs {
-			panes += len(tab.Windows)
-		}
-
-		sessions = append(sessions, SessionInfo{
-			Name:       name,
-			SavedAt:    sess.SavedAt,
-			PaneCount:  panes,
-			HasRunning: runningSet[name],
-			Tabs:       sess.Tabs,
+	var infos []SessionInfo
+	for _, s := range sessions {
+		infos = append(infos, SessionInfo{
+			Name:       s.Name,
+			PaneCount:  s.Panes,
+			HasRunning: s.Status == "running",
 		})
 	}
 
-	return sessionsLoadedMsg{sessions}
-}
-
-// extractSessionName gets the session name from a zmx session name like "project.0.0"
-func extractSessionName(zmxName string) string {
-	for i, c := range zmxName {
-		if c == '.' {
-			return zmxName[:i]
-		}
-	}
-	return zmxName
+	return sessionsLoadedMsg{infos}
 }
 
 // Message types
