@@ -24,11 +24,9 @@ type Tab struct {
 
 // Window represents a single pane in a tab.
 type Window struct {
-	CWD        string  `json:"cwd"`
-	Command    string  `json:"command,omitempty"`
-	Ephemeral  bool    `json:"ephemeral,omitempty"`
-	SplitDir   string  `json:"split_dir,omitempty"`
-	SplitRatio float64 `json:"split_ratio,omitempty"`
+	CWD       string `json:"cwd"`
+	Command   string `json:"command,omitempty"`
+	Ephemeral bool   `json:"ephemeral,omitempty"`
 }
 
 // SplitNode represents a node in the split tree.
