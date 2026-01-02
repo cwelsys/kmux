@@ -3,12 +3,10 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"time"
 
-	"github.com/cwel/kmux/internal/kitty"
-	"github.com/cwel/kmux/internal/model"
+	"github.com/cwel/kmux/internal/config"
+	"github.com/cwel/kmux/internal/daemon/client"
 	"github.com/cwel/kmux/internal/store"
-	"github.com/cwel/kmux/internal/zmx"
 	"github.com/spf13/cobra"
 )
 
@@ -20,87 +18,20 @@ var attachCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name := args[0]
 
-		// Validate session name early
 		if err := store.ValidateSessionName(name); err != nil {
 			return err
 		}
 
-		st := store.DefaultStore()
-		k := kitty.NewClient()
+		c := client.New(config.SocketPath())
 
-		// Try to load existing session
-		session, err := st.LoadSession(name)
-		if err != nil {
-			// Create new session
-			cwd, err := os.Getwd()
-			if err != nil {
-				return fmt.Errorf("get working directory: %w", err)
-			}
-			session = &model.Session{
-				Name:    name,
-				Host:    "local",
-				SavedAt: time.Now(),
-				Tabs: []model.Tab{
-					{
-						Title:  name,
-						Layout: "splits",
-						Windows: []model.Window{
-							{CWD: cwd},
-						},
-					},
-				},
-			}
+		if err := c.EnsureRunning(); err != nil {
+			return fmt.Errorf("daemon: %w", err)
 		}
 
-		// Clear ZmxSessions before rebuilding to avoid duplicates
-		session.ZmxSessions = nil
+		cwd, _ := os.Getwd()
 
-		// Create windows in kitty
-		var firstWindowID int
-		for tabIdx, tab := range session.Tabs {
-			for winIdx, win := range tab.Windows {
-				zmxName := session.ZmxSessionName(tabIdx, winIdx)
-				zmxCmd := zmx.AttachCmd(zmxName, win.Command)
-
-				launchType := "tab"
-				if winIdx > 0 {
-					launchType = "window" // split within tab
-				}
-
-				opts := kitty.LaunchOpts{
-					Type:  launchType,
-					CWD:   win.CWD,
-					Title: tab.Title,
-					Cmd:   zmxCmd,
-					Env:   map[string]string{"KMUX_SESSION": name},
-				}
-
-				windowID, err := k.Launch(opts)
-				if err != nil {
-					return fmt.Errorf("launch window: %w", err)
-				}
-
-				// Remember first window to focus later
-				if tabIdx == 0 && winIdx == 0 {
-					firstWindowID = windowID
-				}
-
-				// Track zmx session
-				session.ZmxSessions = append(session.ZmxSessions, zmxName)
-			}
-		}
-
-		// Focus the first window of the session
-		if firstWindowID > 0 {
-			if err := k.FocusWindow(firstWindowID); err != nil {
-				// Non-fatal - session is created, just not focused
-				fmt.Printf("warning: could not focus window: %v\n", err)
-			}
-		}
-
-		// Save session state
-		if err := st.SaveSession(session); err != nil {
-			return fmt.Errorf("save session: %w", err)
+		if err := c.Attach(name, cwd); err != nil {
+			return err
 		}
 
 		fmt.Printf("Attached to session: %s\n", name)
