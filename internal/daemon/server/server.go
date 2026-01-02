@@ -20,7 +20,7 @@ import (
 
 type SessionState struct {
 	Name      string
-	Status    string // "attached", "detached", "saved"
+	Status    string // "attached", "detached"
 	Panes     int    // number of panes in session
 	WindowIDs []int
 	ZmxAlive  bool
