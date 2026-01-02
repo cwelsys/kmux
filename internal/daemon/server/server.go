@@ -37,15 +37,16 @@ type DaemonState struct {
 
 // Server is the kmux daemon server.
 type Server struct {
-	socketPath string
-	dataDir    string
-	listener   net.Listener
-	mu         sync.Mutex
-	done       chan struct{}
+	socketPath  string
+	dataDir     string
+	kittySocket string // stored from first request, used for polling
+	listener    net.Listener
+	mu          sync.Mutex
+	done        chan struct{}
 
 	// Internal clients - daemon owns these
 	store *store.Store
-	kitty *kitty.Client
+	kitty *kitty.Client // default client, updated when kittySocket changes
 	zmx   *zmx.Client
 	cfg   *config.Config
 	state *DaemonState
@@ -178,7 +179,7 @@ func (s *Server) handleRequest(req protocol.Request) protocol.Response {
 	}
 }
 
-// kittyForRequest creates a kitty client for the request's socket
+// kittyForRequest creates a kitty client for the request's socket and stores it for polling
 func (s *Server) kittyForRequest(req protocol.Request) *kitty.Client {
 	if req.KittySocket != "" {
 		// Extract path from "unix:/path/to/socket" format
@@ -186,9 +187,18 @@ func (s *Server) kittyForRequest(req protocol.Request) *kitty.Client {
 		if len(socket) > 5 && socket[:5] == "unix:" {
 			socket = socket[5:]
 		}
+
+		// Store socket for polling/auto-save if we don't have one yet
+		s.mu.Lock()
+		if s.kittySocket == "" || s.kittySocket != socket {
+			s.kittySocket = socket
+			s.kitty = kitty.NewClientWithSocket(socket)
+		}
+		s.mu.Unlock()
+
 		return kitty.NewClientWithSocket(socket)
 	}
-	return s.kitty // fallback to default (may not work)
+	return s.kitty // fallback to stored client
 }
 
 // initState loads saved sessions and reconciles with running zmx processes
@@ -568,14 +578,44 @@ func (s *Server) pollState() {
 		}
 	}
 
+	// Poll kitty if we have a socket
+	s.mu.Lock()
+	kittyClient := s.kitty
+	s.mu.Unlock()
+
+	var kittyState kitty.KittyState
+	kittyWindowsBySession := make(map[string][]int) // session name -> window IDs
+
+	if kittyClient != nil {
+		var err error
+		kittyState, err = kittyClient.GetState()
+		if err == nil && len(kittyState) > 0 {
+			// Extract windows by KMUX_SESSION
+			for _, osWin := range kittyState {
+				for _, tab := range osWin.Tabs {
+					for _, win := range tab.Windows {
+						if sessName := win.Env["KMUX_SESSION"]; sessName != "" {
+							kittyWindowsBySession[sessName] = append(kittyWindowsBySession[sessName], win.ID)
+						}
+					}
+				}
+			}
+		}
+	}
+
 	// Update state
 	s.mu.Lock()
-	defer s.mu.Unlock()
+
+	prevWindowIDs := make(map[string][]int)
+	for name, sess := range s.state.Sessions {
+		prevWindowIDs[name] = sess.WindowIDs
+	}
 
 	s.state.ZmxSessions = zmxSessions
+	s.state.KittyState = kittyState
 	s.state.LastPoll = time.Now()
 
-	// Discover new zmx sessions
+	// Discover new sessions from zmx
 	for name := range zmxBySession {
 		if _, exists := s.state.Sessions[name]; !exists {
 			s.state.Sessions[name] = &SessionState{
@@ -588,34 +628,100 @@ func (s *Server) pollState() {
 		}
 	}
 
-	// Update existing sessions based on zmx state
+	// Discover new sessions from kitty
+	for name := range kittyWindowsBySession {
+		if _, exists := s.state.Sessions[name]; !exists {
+			s.state.Sessions[name] = &SessionState{
+				Name:     name,
+				Status:   "attached",
+				ZmxAlive: zmxBySession[name],
+				LastSeen: time.Now(),
+			}
+		}
+	}
+
+	// Update existing sessions
+	var sessionsToSave []string
 	for name, sess := range s.state.Sessions {
 		sess.ZmxAlive = zmxBySession[name]
+		windowIDs := kittyWindowsBySession[name]
+		sess.WindowIDs = windowIDs
+		sess.Panes = len(windowIDs)
+		if sess.Panes == 0 {
+			sess.Panes = 1 // at least 1 if saved
+		}
 
-		// Update status based on zmx state
-		if sess.ZmxAlive {
-			if sess.Status == "saved" {
-				sess.Status = "detached"
+		// Determine status
+		hasWindows := len(windowIDs) > 0
+		prevHadWindows := len(prevWindowIDs[name]) > 0
+
+		if hasWindows {
+			sess.Status = "attached"
+			sess.LastSeen = time.Now()
+		} else if sess.ZmxAlive {
+			// Windows disappeared but zmx still running - save immediately
+			if prevHadWindows {
+				sessionsToSave = append(sessionsToSave, name)
 			}
+			sess.Status = "detached"
 			sess.LastSeen = time.Now()
 		} else {
-			// No zmx running - check if save file exists
+			// No windows, no zmx - check if save file exists
 			if _, err := s.store.LoadSession(name); err != nil {
-				// No zmx, no save file - remove ghost session
 				delete(s.state.Sessions, name)
 			} else {
 				sess.Status = "saved"
-				sess.LastSeen = time.Now()
 			}
 		}
+	}
+
+	s.mu.Unlock()
+
+	// Save sessions that lost windows (outside lock to avoid deadlock)
+	for _, name := range sessionsToSave {
+		s.saveSession(name)
 	}
 }
 
 func (s *Server) autoSaveAll() {
-	// Auto-save is limited because we can't query kitty without a socket
-	// Sessions are saved during attach/detach operations
-	// This is a design limitation when the daemon doesn't have a persistent kitty connection
 	s.mu.Lock()
+	kittyClient := s.kitty
+	kittyState := s.state.KittyState
+	var attachedSessions []string
+	for name, sess := range s.state.Sessions {
+		if sess.Status == "attached" {
+			attachedSessions = append(attachedSessions, name)
+		}
+	}
 	s.state.LastAutoSave = time.Now()
 	s.mu.Unlock()
+
+	// Can't auto-save without kitty state
+	if kittyClient == nil || len(kittyState) == 0 {
+		return
+	}
+
+	// Save each attached session
+	for _, name := range attachedSessions {
+		session := manager.DeriveSession(name, kittyState)
+		if len(session.Tabs) > 0 {
+			s.store.SaveSession(session)
+		}
+	}
+}
+
+// saveSession derives and saves a session from current kitty state
+func (s *Server) saveSession(name string) {
+	s.mu.Lock()
+	kittyState := s.state.KittyState
+	s.mu.Unlock()
+
+	if len(kittyState) == 0 {
+		return
+	}
+
+	session := manager.DeriveSession(name, kittyState)
+	if len(session.Tabs) > 0 {
+		s.store.SaveSession(session)
+	}
 }
