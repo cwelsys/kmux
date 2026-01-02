@@ -169,3 +169,57 @@ func TestServer_ExcludeSaved(t *testing.T) {
 		t.Errorf("got %d sessions, want 0 (saved sessions should be excluded)", len(sessions))
 	}
 }
+
+func TestServer_IncludeRestore(t *testing.T) {
+	tmpDir := t.TempDir()
+	socketPath := filepath.Join(tmpDir, "test.sock")
+	dataDir := filepath.Join(tmpDir, "data")
+
+	// Create a saved session (no zmx running)
+	st := store.New(dataDir)
+	sess := &model.Session{
+		Name: "testsession",
+		Tabs: []model.Tab{{Windows: []model.Window{{CWD: "/tmp"}}}},
+	}
+	if err := st.SaveSession(sess); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+
+	srv := New(socketPath, dataDir)
+	go srv.Start()
+	defer srv.Stop()
+	time.Sleep(50 * time.Millisecond)
+
+	// Request sessions WITH --all
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	req, _ := protocol.NewRequestWithParams(protocol.MethodSessions, "", protocol.SessionsParams{
+		IncludeRestorePoints: true,
+	})
+	json.NewEncoder(conn).Encode(req)
+
+	var resp protocol.Response
+	json.NewDecoder(conn).Decode(&resp)
+
+	if resp.Error != "" {
+		t.Fatalf("error: %s", resp.Error)
+	}
+
+	var sessions []protocol.SessionInfo
+	json.Unmarshal(resp.Result, &sessions)
+
+	// Should include the restore point
+	if len(sessions) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(sessions))
+	}
+	if sessions[0].Name != "testsession" {
+		t.Errorf("got name %q, want testsession", sessions[0].Name)
+	}
+	if !sessions[0].IsRestorePoint {
+		t.Error("session should be marked as restore point")
+	}
+}

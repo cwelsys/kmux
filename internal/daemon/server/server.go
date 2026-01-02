@@ -146,7 +146,11 @@ func (s *Server) handleRequest(req protocol.Request) protocol.Response {
 	case protocol.MethodPing:
 		return protocol.SuccessResponse("pong")
 	case protocol.MethodSessions:
-		return s.handleSessions(k)
+		var params protocol.SessionsParams
+		if len(req.Params) > 0 {
+			json.Unmarshal(req.Params, &params)
+		}
+		return s.handleSessions(k, params)
 	case protocol.MethodAttach:
 		var params protocol.AttachParams
 		if err := json.Unmarshal(req.Params, &params); err != nil {
@@ -283,17 +287,51 @@ func (s *Server) initState() {
 	s.state.LastPoll = time.Now()
 }
 
-func (s *Server) handleSessions(k *kitty.Client) protocol.Response {
+func (s *Server) handleSessions(k *kitty.Client, params protocol.SessionsParams) protocol.Response {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	var sessions []protocol.SessionInfo
+
+	// Add running sessions
 	for _, sess := range s.state.Sessions {
 		sessions = append(sessions, protocol.SessionInfo{
-			Name:   sess.Name,
-			Status: sess.Status,
-			Panes:  sess.Panes,
+			Name:           sess.Name,
+			Status:         sess.Status,
+			Panes:          sess.Panes,
+			IsRestorePoint: false,
 		})
+	}
+
+	// Add restore points if requested
+	if params.IncludeRestorePoints {
+		saved, _ := s.store.ListSessions()
+		runningNames := make(map[string]bool)
+		for _, sess := range s.state.Sessions {
+			runningNames[sess.Name] = true
+		}
+
+		for _, name := range saved {
+			if runningNames[name] {
+				continue // already listed as running
+			}
+
+			// Load to get pane count
+			panes := 1
+			if sess, err := s.store.LoadSession(name); err == nil {
+				panes = 0
+				for _, tab := range sess.Tabs {
+					panes += len(tab.Windows)
+				}
+			}
+
+			sessions = append(sessions, protocol.SessionInfo{
+				Name:           name,
+				Status:         "saved",
+				Panes:          panes,
+				IsRestorePoint: true,
+			})
+		}
 	}
 
 	return protocol.SuccessResponse(sessions)
