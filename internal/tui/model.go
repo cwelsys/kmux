@@ -58,7 +58,7 @@ func (m Model) loadSessions() tea.Msg {
 		infos = append(infos, SessionInfo{
 			Name:       s.Name,
 			PaneCount:  s.Panes,
-			HasRunning: s.Status == "running",
+			HasRunning: s.Status == "attached",
 		})
 	}
 
