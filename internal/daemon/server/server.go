@@ -18,6 +18,22 @@ import (
 	"github.com/cwel/kmux/internal/zmx"
 )
 
+type SessionState struct {
+	Name      string
+	Status    string // "attached", "detached", "saved"
+	WindowIDs []int
+	ZmxAlive  bool
+	LastSeen  time.Time
+}
+
+type DaemonState struct {
+	Sessions     map[string]*SessionState
+	KittyState   kitty.KittyState
+	ZmxSessions  []string
+	LastPoll     time.Time
+	LastAutoSave time.Time
+}
+
 // Server is the kmux daemon server.
 type Server struct {
 	socketPath string
@@ -31,6 +47,7 @@ type Server struct {
 	kitty *kitty.Client
 	zmx   *zmx.Client
 	cfg   *config.Config
+	state *DaemonState
 }
 
 // New creates a new daemon server.
@@ -43,6 +60,9 @@ func New(socketPath, dataDir string) *Server {
 		kitty:      kitty.NewClient(),
 		zmx:        zmx.NewClient(),
 		cfg:        config.DefaultConfig(),
+		state: &DaemonState{
+			Sessions: make(map[string]*SessionState),
+		},
 	}
 }
 
@@ -66,6 +86,8 @@ func (s *Server) Start() error {
 	s.mu.Lock()
 	s.listener = listener
 	s.mu.Unlock()
+
+	go s.runPollingLoop()
 
 	// Accept loop
 	for {
@@ -352,4 +374,98 @@ func (s *Server) handleKill(params protocol.KillParams) protocol.Response {
 		Success: true,
 		Message: fmt.Sprintf("Killed session: %s", name),
 	})
+}
+
+func (s *Server) runPollingLoop() {
+	pollTicker := time.NewTicker(time.Duration(s.cfg.WatchInterval) * time.Second)
+	saveTicker := time.NewTicker(time.Duration(s.cfg.AutoSaveInterval) * time.Second)
+	defer pollTicker.Stop()
+	defer saveTicker.Stop()
+
+	for {
+		select {
+		case <-s.done:
+			s.autoSaveAll()
+			return
+		case <-pollTicker.C:
+			s.pollState()
+		case <-saveTicker.C:
+			s.autoSaveAll()
+		}
+	}
+}
+
+func (s *Server) pollState() {
+	// Poll kitty
+	kittyState, _ := s.kitty.GetState()
+
+	// Poll zmx
+	zmxSessions, _ := s.zmx.List()
+	zmxSet := make(map[string]bool)
+	for _, z := range zmxSessions {
+		zmxSet[z] = true
+	}
+
+	// Update state
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	s.state.KittyState = kittyState
+	s.state.ZmxSessions = zmxSessions
+	s.state.LastPoll = time.Now()
+
+	// Track which sessions have windows
+	sessionWindows := make(map[string][]int)
+	if len(kittyState) > 0 {
+		for _, tab := range kittyState[0].Tabs {
+			for _, win := range tab.Windows {
+				if name := win.Env["KMUX_SESSION"]; name != "" {
+					sessionWindows[name] = append(sessionWindows[name], win.ID)
+				}
+			}
+		}
+	}
+
+	// Update session states
+	saved, _ := s.store.ListSessions()
+	for _, name := range saved {
+		sess, ok := s.state.Sessions[name]
+		if !ok {
+			sess = &SessionState{Name: name}
+			s.state.Sessions[name] = sess
+		}
+
+		sess.WindowIDs = sessionWindows[name]
+		sess.ZmxAlive = false
+		for _, z := range zmxSessions {
+			if len(z) > len(name) && z[:len(name)+1] == name+"." {
+				sess.ZmxAlive = true
+				break
+			}
+		}
+
+		if len(sess.WindowIDs) > 0 {
+			sess.Status = "attached"
+		} else if sess.ZmxAlive {
+			sess.Status = "detached"
+		} else {
+			sess.Status = "saved"
+		}
+
+		sess.LastSeen = time.Now()
+	}
+}
+
+func (s *Server) autoSaveAll() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for name, sess := range s.state.Sessions {
+		if sess.Status == "attached" && len(s.state.KittyState) > 0 {
+			session := manager.DeriveSession(name, s.state.KittyState)
+			s.store.SaveSession(session)
+		}
+	}
+
+	s.state.LastAutoSave = time.Now()
 }
