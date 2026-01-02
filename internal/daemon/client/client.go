@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"os"
+	"os/exec"
 	"time"
 
 	"github.com/cwel/kmux/internal/daemon/protocol"
@@ -27,6 +29,34 @@ func (c *Client) IsRunning() bool {
 	}
 	conn.Close()
 	return true
+}
+
+// EnsureRunning starts the daemon if not running.
+func (c *Client) EnsureRunning() error {
+	if c.IsRunning() {
+		return nil
+	}
+
+	// Start daemon
+	executable, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("get executable: %w", err)
+	}
+
+	cmd := exec.Command(executable, "daemon", "start")
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start daemon: %w", err)
+	}
+
+	// Wait for socket
+	for i := 0; i < 50; i++ { // 5 seconds max
+		if c.IsRunning() {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	return fmt.Errorf("daemon did not start within 5 seconds")
 }
 
 // call sends a request and returns the response.
