@@ -48,7 +48,7 @@ func (m Model) Init() tea.Cmd {
 
 // loadSessions loads session data from daemon.
 func (m Model) loadSessions() tea.Msg {
-	sessions, err := m.client.Sessions()
+	sessions, err := m.client.Sessions(true) // TUI shows all sessions including restore points
 	if err != nil {
 		return errMsg{err}
 	}

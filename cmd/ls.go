@@ -10,11 +10,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var lsAll bool
+
 var lsCmd = &cobra.Command{
 	Use:     "ls",
 	Aliases: []string{"list"},
 	Short:   "List sessions",
-	Long:    "List saved sessions and their status.",
+	Long:    "List running sessions. Use --all to include restore points.",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := client.New(config.SocketPath())
 
@@ -22,7 +24,7 @@ var lsCmd = &cobra.Command{
 			return fmt.Errorf("daemon: %w", err)
 		}
 
-		sessions, err := c.Sessions()
+		sessions, err := c.Sessions(lsAll)
 		if err != nil {
 			return err
 		}
@@ -40,5 +42,6 @@ var lsCmd = &cobra.Command{
 }
 
 func init() {
+	lsCmd.Flags().BoolVarP(&lsAll, "all", "a", false, "Include restore points (saved sessions without running zmx)")
 	rootCmd.AddCommand(lsCmd)
 }
