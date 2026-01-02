@@ -12,6 +12,7 @@ import (
 	"github.com/cwel/kmux/internal/config"
 	"github.com/cwel/kmux/internal/daemon/protocol"
 	"github.com/cwel/kmux/internal/kitty"
+	"github.com/cwel/kmux/internal/manager"
 	"github.com/cwel/kmux/internal/model"
 	"github.com/cwel/kmux/internal/store"
 	"github.com/cwel/kmux/internal/zmx"
@@ -120,6 +121,12 @@ func (s *Server) handleRequest(req protocol.Request) protocol.Response {
 			return protocol.ErrorResponse(fmt.Sprintf("invalid params: %v", err))
 		}
 		return s.handleAttach(params)
+	case protocol.MethodDetach:
+		var params protocol.DetachParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return protocol.ErrorResponse(fmt.Sprintf("invalid params: %v", err))
+		}
+		return s.handleDetach(params)
 	case protocol.MethodShutdown:
 		go func() {
 			s.Stop()
@@ -254,5 +261,43 @@ func (s *Server) handleAttach(params protocol.AttachParams) protocol.Response {
 	return protocol.SuccessResponse(protocol.AttachResult{
 		Success: true,
 		Message: fmt.Sprintf("Attached to session: %s", name),
+	})
+}
+
+func (s *Server) handleDetach(params protocol.DetachParams) protocol.Response {
+	name := params.Name
+
+	if err := store.ValidateSessionName(name); err != nil {
+		return protocol.ErrorResponse(err.Error())
+	}
+
+	// Get current kitty state
+	state, err := s.kitty.GetState()
+	if err != nil {
+		return protocol.ErrorResponse(fmt.Sprintf("get kitty state: %v", err))
+	}
+
+	// Derive session from current state
+	session := manager.DeriveSession(name, state)
+
+	// Save session
+	if err := s.store.SaveSession(session); err != nil {
+		return protocol.ErrorResponse(fmt.Sprintf("save session: %v", err))
+	}
+
+	// Close windows belonging to this session
+	if len(state) > 0 {
+		for _, tab := range state[0].Tabs {
+			for _, win := range tab.Windows {
+				if win.Env["KMUX_SESSION"] == name {
+					s.kitty.CloseWindow(win.ID)
+				}
+			}
+		}
+	}
+
+	return protocol.SuccessResponse(protocol.AttachResult{
+		Success: true,
+		Message: fmt.Sprintf("Detached from session: %s", name),
 	})
 }
