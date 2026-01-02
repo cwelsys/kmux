@@ -14,8 +14,9 @@ const (
 
 // Request is an RPC request.
 type Request struct {
-	Method string          `json:"method"`
-	Params json.RawMessage `json:"params,omitempty"`
+	Method      string          `json:"method"`
+	Params      json.RawMessage `json:"params,omitempty"`
+	KittySocket string          `json:"kitty_socket,omitempty"` // KITTY_LISTEN_ON value
 }
 
 // Response is an RPC response.
@@ -65,15 +66,15 @@ func ErrorResponse(msg string) Response {
 }
 
 // NewRequest creates a request with no params.
-func NewRequest(method string) Request {
-	return Request{Method: method}
+func NewRequest(method string, kittySocket string) Request {
+	return Request{Method: method, KittySocket: kittySocket}
 }
 
 // NewRequestWithParams creates a request with params.
-func NewRequestWithParams(method string, params any) (Request, error) {
+func NewRequestWithParams(method string, kittySocket string, params any) (Request, error) {
 	data, err := json.Marshal(params)
 	if err != nil {
 		return Request{}, err
 	}
-	return Request{Method: method, Params: data}, nil
+	return Request{Method: method, Params: data, KittySocket: kittySocket}, nil
 }

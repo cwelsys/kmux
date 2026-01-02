@@ -65,7 +65,7 @@ func TestServer_Ping(t *testing.T) {
 	}
 	defer conn.Close()
 
-	req := protocol.NewRequest(protocol.MethodPing)
+	req := protocol.NewRequest(protocol.MethodPing, "")
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
 		t.Fatalf("encode request: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestServer_Sessions(t *testing.T) {
 	}
 	defer conn.Close()
 
-	req := protocol.NewRequest(protocol.MethodSessions)
+	req := protocol.NewRequest(protocol.MethodSessions, "")
 	json.NewEncoder(conn).Encode(req)
 
 	var resp protocol.Response

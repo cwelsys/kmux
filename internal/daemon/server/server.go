@@ -132,29 +132,32 @@ func (s *Server) handleConn(conn net.Conn) {
 }
 
 func (s *Server) handleRequest(req protocol.Request) protocol.Response {
+	// Create kitty client for this request using the socket from the request
+	k := s.kittyForRequest(req)
+
 	switch req.Method {
 	case protocol.MethodPing:
 		return protocol.SuccessResponse("pong")
 	case protocol.MethodSessions:
-		return s.handleSessions()
+		return s.handleSessions(k)
 	case protocol.MethodAttach:
 		var params protocol.AttachParams
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			return protocol.ErrorResponse(fmt.Sprintf("invalid params: %v", err))
 		}
-		return s.handleAttach(params)
+		return s.handleAttach(k, params)
 	case protocol.MethodDetach:
 		var params protocol.DetachParams
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			return protocol.ErrorResponse(fmt.Sprintf("invalid params: %v", err))
 		}
-		return s.handleDetach(params)
+		return s.handleDetach(k, params)
 	case protocol.MethodKill:
 		var params protocol.KillParams
 		if err := json.Unmarshal(req.Params, &params); err != nil {
 			return protocol.ErrorResponse(fmt.Sprintf("invalid params: %v", err))
 		}
-		return s.handleKill(params)
+		return s.handleKill(k, params)
 	case protocol.MethodShutdown:
 		go func() {
 			s.Stop()
@@ -165,7 +168,20 @@ func (s *Server) handleRequest(req protocol.Request) protocol.Response {
 	}
 }
 
-func (s *Server) handleSessions() protocol.Response {
+// kittyForRequest creates a kitty client for the request's socket
+func (s *Server) kittyForRequest(req protocol.Request) *kitty.Client {
+	if req.KittySocket != "" {
+		// Extract path from "unix:/path/to/socket" format
+		socket := req.KittySocket
+		if len(socket) > 5 && socket[:5] == "unix:" {
+			socket = socket[5:]
+		}
+		return kitty.NewClientWithSocket(socket)
+	}
+	return s.kitty // fallback to default (may not work)
+}
+
+func (s *Server) handleSessions(k *kitty.Client) protocol.Response {
 	names, err := s.store.ListSessions()
 	if err != nil {
 		return protocol.ErrorResponse(fmt.Sprintf("list sessions: %v", err))
@@ -209,7 +225,7 @@ func (s *Server) handleSessions() protocol.Response {
 	return protocol.SuccessResponse(sessions)
 }
 
-func (s *Server) handleAttach(params protocol.AttachParams) protocol.Response {
+func (s *Server) handleAttach(k *kitty.Client, params protocol.AttachParams) protocol.Response {
 	name := params.Name
 
 	if err := store.ValidateSessionName(name); err != nil {
@@ -263,7 +279,7 @@ func (s *Server) handleAttach(params protocol.AttachParams) protocol.Response {
 				Env:   map[string]string{"KMUX_SESSION": name},
 			}
 
-			windowID, err := s.kitty.Launch(opts)
+			windowID, err := k.Launch(opts)
 			if err != nil {
 				return protocol.ErrorResponse(fmt.Sprintf("launch window: %v", err))
 			}
@@ -278,7 +294,7 @@ func (s *Server) handleAttach(params protocol.AttachParams) protocol.Response {
 
 	// Focus first window
 	if firstWindowID > 0 {
-		s.kitty.FocusWindow(firstWindowID)
+		k.FocusWindow(firstWindowID)
 	}
 
 	// Save session
@@ -292,7 +308,7 @@ func (s *Server) handleAttach(params protocol.AttachParams) protocol.Response {
 	})
 }
 
-func (s *Server) handleDetach(params protocol.DetachParams) protocol.Response {
+func (s *Server) handleDetach(k *kitty.Client, params protocol.DetachParams) protocol.Response {
 	name := params.Name
 
 	if err := store.ValidateSessionName(name); err != nil {
@@ -300,7 +316,7 @@ func (s *Server) handleDetach(params protocol.DetachParams) protocol.Response {
 	}
 
 	// Get current kitty state
-	state, err := s.kitty.GetState()
+	state, err := k.GetState()
 	if err != nil {
 		return protocol.ErrorResponse(fmt.Sprintf("get kitty state: %v", err))
 	}
@@ -318,7 +334,7 @@ func (s *Server) handleDetach(params protocol.DetachParams) protocol.Response {
 		for _, tab := range state[0].Tabs {
 			for _, win := range tab.Windows {
 				if win.Env["KMUX_SESSION"] == name {
-					s.kitty.CloseWindow(win.ID)
+					k.CloseWindow(win.ID)
 				}
 			}
 		}
@@ -330,7 +346,7 @@ func (s *Server) handleDetach(params protocol.DetachParams) protocol.Response {
 	})
 }
 
-func (s *Server) handleKill(params protocol.KillParams) protocol.Response {
+func (s *Server) handleKill(k *kitty.Client, params protocol.KillParams) protocol.Response {
 	name := params.Name
 
 	if err := store.ValidateSessionName(name); err != nil {
@@ -356,12 +372,12 @@ func (s *Server) handleKill(params protocol.KillParams) protocol.Response {
 	}
 
 	// Close any kitty windows for this session
-	state, _ := s.kitty.GetState()
+	state, _ := k.GetState()
 	if len(state) > 0 {
 		for _, tab := range state[0].Tabs {
 			for _, win := range tab.Windows {
 				if win.Env["KMUX_SESSION"] == name {
-					s.kitty.CloseWindow(win.ID)
+					k.CloseWindow(win.ID)
 				}
 			}
 		}

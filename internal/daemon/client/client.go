@@ -13,12 +13,16 @@ import (
 
 // Client is a daemon RPC client.
 type Client struct {
-	socketPath string
+	socketPath  string
+	kittySocket string // KITTY_LISTEN_ON value
 }
 
 // New creates a new daemon client.
 func New(socketPath string) *Client {
-	return &Client{socketPath: socketPath}
+	return &Client{
+		socketPath:  socketPath,
+		kittySocket: os.Getenv("KITTY_LISTEN_ON"),
+	}
 }
 
 // IsRunning checks if the daemon is running.
@@ -85,19 +89,19 @@ func (c *Client) call(req protocol.Request) (protocol.Response, error) {
 
 // Ping checks if the daemon is responsive.
 func (c *Client) Ping() error {
-	_, err := c.call(protocol.NewRequest(protocol.MethodPing))
+	_, err := c.call(protocol.NewRequest(protocol.MethodPing, c.kittySocket))
 	return err
 }
 
 // Shutdown requests daemon shutdown.
 func (c *Client) Shutdown() error {
-	_, err := c.call(protocol.NewRequest(protocol.MethodShutdown))
+	_, err := c.call(protocol.NewRequest(protocol.MethodShutdown, c.kittySocket))
 	return err
 }
 
 // Sessions returns all sessions from the daemon.
 func (c *Client) Sessions() ([]protocol.SessionInfo, error) {
-	resp, err := c.call(protocol.NewRequest(protocol.MethodSessions))
+	resp, err := c.call(protocol.NewRequest(protocol.MethodSessions, c.kittySocket))
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +116,7 @@ func (c *Client) Sessions() ([]protocol.SessionInfo, error) {
 
 // Attach attaches to a session (creates if new).
 func (c *Client) Attach(name, cwd string) error {
-	req, err := protocol.NewRequestWithParams(protocol.MethodAttach, protocol.AttachParams{
+	req, err := protocol.NewRequestWithParams(protocol.MethodAttach, c.kittySocket, protocol.AttachParams{
 		Name: name,
 		CWD:  cwd,
 	})
@@ -139,7 +143,7 @@ func (c *Client) Attach(name, cwd string) error {
 
 // Detach detaches from a session.
 func (c *Client) Detach(name string) error {
-	req, err := protocol.NewRequestWithParams(protocol.MethodDetach, protocol.DetachParams{
+	req, err := protocol.NewRequestWithParams(protocol.MethodDetach, c.kittySocket, protocol.DetachParams{
 		Name: name,
 	})
 	if err != nil {
@@ -152,7 +156,7 @@ func (c *Client) Detach(name string) error {
 
 // Kill kills a session.
 func (c *Client) Kill(name string) error {
-	req, err := protocol.NewRequestWithParams(protocol.MethodKill, protocol.KillParams{
+	req, err := protocol.NewRequestWithParams(protocol.MethodKill, c.kittySocket, protocol.KillParams{
 		Name: name,
 	})
 	if err != nil {
