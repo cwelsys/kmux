@@ -68,3 +68,30 @@ func TestSplitNode_IsLeaf(t *testing.T) {
 		t.Error("expected branch node")
 	}
 }
+
+func TestTab_WithSplitRoot(t *testing.T) {
+	idx0, idx1 := 0, 1
+	tab := Tab{
+		Title:  "dev",
+		Layout: "splits",
+		Windows: []Window{
+			{CWD: "/project"},
+			{CWD: "/project/src"},
+		},
+		SplitRoot: &SplitNode{
+			Horizontal: true,
+			Bias:       0.7,
+			Children: [2]*SplitNode{
+				{WindowIdx: &idx0},
+				{WindowIdx: &idx1},
+			},
+		},
+	}
+
+	if tab.SplitRoot == nil {
+		t.Error("expected SplitRoot to be set")
+	}
+	if !tab.SplitRoot.Children[0].IsLeaf() {
+		t.Error("first child should be leaf")
+	}
+}

@@ -16,9 +16,10 @@ type Session struct {
 
 // Tab represents a kitty tab containing windows.
 type Tab struct {
-	Title   string   `json:"title"`
-	Layout  string   `json:"layout"`
-	Windows []Window `json:"windows"`
+	Title     string     `json:"title"`
+	Layout    string     `json:"layout"`
+	Windows   []Window   `json:"windows"`
+	SplitRoot *SplitNode `json:"split_root,omitempty"` // nil for single-window tabs
 }
 
 // Window represents a single pane in a tab.
