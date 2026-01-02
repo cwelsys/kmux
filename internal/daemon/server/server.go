@@ -127,6 +127,12 @@ func (s *Server) handleRequest(req protocol.Request) protocol.Response {
 			return protocol.ErrorResponse(fmt.Sprintf("invalid params: %v", err))
 		}
 		return s.handleDetach(params)
+	case protocol.MethodKill:
+		var params protocol.KillParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return protocol.ErrorResponse(fmt.Sprintf("invalid params: %v", err))
+		}
+		return s.handleKill(params)
 	case protocol.MethodShutdown:
 		go func() {
 			s.Stop()
@@ -299,5 +305,51 @@ func (s *Server) handleDetach(params protocol.DetachParams) protocol.Response {
 	return protocol.SuccessResponse(protocol.AttachResult{
 		Success: true,
 		Message: fmt.Sprintf("Detached from session: %s", name),
+	})
+}
+
+func (s *Server) handleKill(params protocol.KillParams) protocol.Response {
+	name := params.Name
+
+	if err := store.ValidateSessionName(name); err != nil {
+		return protocol.ErrorResponse(err.Error())
+	}
+
+	// Load session to get zmx session names
+	session, err := s.store.LoadSession(name)
+	if err != nil {
+		// Session might not be saved, but zmx sessions might exist
+		// Try to find them by prefix
+		running, _ := s.zmx.List()
+		for _, r := range running {
+			if len(r) > len(name) && r[:len(name)+1] == name+"." {
+				s.zmx.Kill(r)
+			}
+		}
+	} else {
+		// Kill all zmx sessions
+		for _, zmxName := range session.ZmxSessions {
+			s.zmx.Kill(zmxName)
+		}
+	}
+
+	// Close any kitty windows for this session
+	state, _ := s.kitty.GetState()
+	if len(state) > 0 {
+		for _, tab := range state[0].Tabs {
+			for _, win := range tab.Windows {
+				if win.Env["KMUX_SESSION"] == name {
+					s.kitty.CloseWindow(win.ID)
+				}
+			}
+		}
+	}
+
+	// Delete saved session
+	s.store.DeleteSession(name)
+
+	return protocol.SuccessResponse(protocol.AttachResult{
+		Success: true,
+		Message: fmt.Sprintf("Killed session: %s", name),
 	})
 }

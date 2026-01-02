@@ -119,3 +119,16 @@ func (c *Client) Detach(name string) error {
 	_, err = c.call(req)
 	return err
 }
+
+// Kill kills a session.
+func (c *Client) Kill(name string) error {
+	req, err := protocol.NewRequestWithParams(protocol.MethodKill, protocol.KillParams{
+		Name: name,
+	})
+	if err != nil {
+		return err
+	}
+
+	_, err = c.call(req)
+	return err
+}
