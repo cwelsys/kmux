@@ -28,12 +28,11 @@ type SessionState struct {
 }
 
 type DaemonState struct {
-	Sessions       map[string]*SessionState
-	KittyState     kitty.KittyState
-	ZmxSessions    []string
-	LastPoll       time.Time
-	LastAutoSave   time.Time
-	RecentlyKilled map[string]time.Time // sessions killed recently, don't re-add
+	Sessions     map[string]*SessionState
+	KittyState   kitty.KittyState
+	ZmxSessions  []string
+	LastPoll     time.Time
+	LastAutoSave time.Time
 }
 
 // Server is the kmux daemon server.
@@ -64,8 +63,7 @@ func New(socketPath, dataDir string) *Server {
 		zmx:        zmx.NewClient(),
 		cfg:        config.DefaultConfig(),
 		state: &DaemonState{
-			Sessions:       make(map[string]*SessionState),
-			RecentlyKilled: make(map[string]time.Time),
+			Sessions: make(map[string]*SessionState),
 		},
 	}
 }
@@ -287,6 +285,21 @@ func (s *Server) initState() {
 	s.state.LastPoll = time.Now()
 }
 
+// countZmxPanes counts zmx sessions with the given prefix
+func countZmxPanes(zmxSessions []string, sessionName string) int {
+	prefix := sessionName + "."
+	count := 0
+	for _, z := range zmxSessions {
+		if len(z) > len(prefix) && z[:len(prefix)] == prefix {
+			count++
+		}
+	}
+	if count == 0 {
+		return 1
+	}
+	return count
+}
+
 func (s *Server) handleSessions(k *kitty.Client, params protocol.SessionsParams) protocol.Response {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -493,10 +506,9 @@ func (s *Server) handleKill(k *kitty.Client, params protocol.KillParams) protoco
 	// Delete saved session
 	s.store.DeleteSession(name)
 
-	// Remove from internal state and mark as recently killed
+	// Remove from internal state
 	s.mu.Lock()
 	delete(s.state.Sessions, name)
-	s.state.RecentlyKilled[name] = time.Now()
 	s.mu.Unlock()
 
 	return protocol.SuccessResponse(protocol.AttachResult{
@@ -685,27 +697,11 @@ func (s *Server) pollState() {
 	s.state.KittyState = kittyState
 	s.state.LastPoll = time.Now()
 
-	// Clean up old entries from RecentlyKilled (older than 30 seconds)
-	for name, killedAt := range s.state.RecentlyKilled {
-		if time.Since(killedAt) > 30*time.Second {
-			delete(s.state.RecentlyKilled, name)
-		}
-	}
-
-	// Discover new sessions from zmx (skip recently killed)
+	// Discover new sessions from zmx
 	for name := range zmxBySession {
 		if _, exists := s.state.Sessions[name]; !exists {
-			if _, killed := s.state.RecentlyKilled[name]; killed {
-				continue // don't re-add recently killed sessions
-			}
-			// Try to load pane count from saved file
-			panes := 1
-			if sess, err := s.store.LoadSession(name); err == nil {
-				panes = 0
-				for _, tab := range sess.Tabs {
-					panes += len(tab.Windows)
-				}
-			}
+			// Count panes from zmx processes
+			panes := countZmxPanes(zmxSessions, name)
 			s.state.Sessions[name] = &SessionState{
 				Name:     name,
 				Status:   "detached",
@@ -716,12 +712,9 @@ func (s *Server) pollState() {
 		}
 	}
 
-	// Discover new sessions from kitty (skip recently killed)
+	// Discover new sessions from kitty
 	for name := range kittyWindowsBySession {
 		if _, exists := s.state.Sessions[name]; !exists {
-			if _, killed := s.state.RecentlyKilled[name]; killed {
-				continue // don't re-add recently killed sessions
-			}
 			s.state.Sessions[name] = &SessionState{
 				Name:     name,
 				Status:   "attached",
