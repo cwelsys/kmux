@@ -55,3 +55,63 @@ func TestParseState(t *testing.T) {
 		t.Errorf("foreground cmd = %s, want nvim", win.ForegroundProcesses[0].Cmdline[0])
 	}
 }
+
+func TestParseState_WithSplits(t *testing.T) {
+	jsonData := `[{
+		"id": 1,
+		"tabs": [{
+			"id": 1,
+			"title": "test",
+			"layout": "splits",
+			"layout_state": {
+				"pairs": {
+					"horizontal": true,
+					"bias": 0.7,
+					"one": 42,
+					"two": {"one": 43, "two": 44}
+				}
+			},
+			"windows": [
+				{"id": 42, "cwd": "/", "env": {}},
+				{"id": 43, "cwd": "/", "env": {}},
+				{"id": 44, "cwd": "/", "env": {}}
+			]
+		}]
+	}]`
+
+	state, err := ParseState([]byte(jsonData))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+
+	pairs := state[0].Tabs[0].LayoutState.Pairs
+	if pairs == nil {
+		t.Fatal("pairs should not be nil")
+	}
+
+	// Verify root is horizontal with bias
+	if !pairs.Horizontal {
+		t.Error("root should be horizontal")
+	}
+	if pairs.Bias != 0.7 {
+		t.Errorf("bias = %v, want 0.7", pairs.Bias)
+	}
+
+	// Verify first child is window 42
+	if pairs.One == nil || pairs.One.WindowID == nil || *pairs.One.WindowID != 42 {
+		t.Error("first child should be window 42")
+	}
+
+	// Verify second child is nested pair
+	if pairs.Two == nil || pairs.Two.WindowID != nil {
+		t.Error("second child should be nested pair")
+	}
+
+	// Verify nested pair defaults (horizontal defaults to true when omitted in kitty)
+	if pairs.Two.Horizontal != true {
+		t.Errorf("nested horizontal = %v, want true (default)", pairs.Two.Horizontal)
+	}
+	if pairs.Two.Bias != 0.5 {
+		t.Errorf("nested bias = %v, want 0.5 (default)", pairs.Two.Bias)
+	}
+}

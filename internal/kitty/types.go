@@ -1,5 +1,7 @@
 package kitty
 
+import "encoding/json"
+
 // KittyState represents the full output of `kitty @ ls`.
 type KittyState []OSWindow
 
@@ -22,7 +24,67 @@ type Tab struct {
 
 // LayoutState contains split information.
 type LayoutState struct {
-	Pairs interface{} `json:"pairs"` // Complex nested structure
+	Pairs *Pair `json:"pairs,omitempty"`
+}
+
+// Pair represents a split node in kitty's layout tree.
+// Either WindowID is set (leaf) or One/Two are set (branch).
+type Pair struct {
+	// Leaf node
+	WindowID *int `json:"-"` // populated during unmarshal
+
+	// Branch node
+	Horizontal bool    `json:"horizontal,omitempty"` // default true (omitted in JSON)
+	Bias       float64 `json:"bias,omitempty"`       // default 0.5 (omitted in JSON)
+	One        *Pair   `json:"one,omitempty"`
+	Two        *Pair   `json:"two,omitempty"`
+}
+
+// UnmarshalJSON handles the polymorphic pairs structure.
+// A pair can be either an int (window ID) or an object (split node).
+func (p *Pair) UnmarshalJSON(data []byte) error {
+	// Try as int first (leaf node)
+	var id int
+	if err := json.Unmarshal(data, &id); err == nil {
+		p.WindowID = &id
+		return nil
+	}
+
+	// Parse as raw map first to check which fields are present
+	var raw map[string]json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	// Parse each field
+	if v, ok := raw["one"]; ok {
+		p.One = &Pair{}
+		if err := json.Unmarshal(v, p.One); err != nil {
+			return err
+		}
+	}
+	if v, ok := raw["two"]; ok {
+		p.Two = &Pair{}
+		if err := json.Unmarshal(v, p.Two); err != nil {
+			return err
+		}
+	}
+	if v, ok := raw["horizontal"]; ok {
+		if err := json.Unmarshal(v, &p.Horizontal); err != nil {
+			return err
+		}
+	} else {
+		p.Horizontal = true // default when omitted
+	}
+	if v, ok := raw["bias"]; ok {
+		if err := json.Unmarshal(v, &p.Bias); err != nil {
+			return err
+		}
+	} else {
+		p.Bias = 0.5 // default when omitted
+	}
+
+	return nil
 }
 
 // Window represents a kitty window (pane).
