@@ -3,6 +3,9 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"os/signal"
+	"path/filepath"
+	"syscall"
 
 	"github.com/cwel/kmux/internal/config"
 	"github.com/cwel/kmux/internal/daemon/client"
@@ -24,20 +27,37 @@ var daemonStartCmd = &cobra.Command{
 
 		socketPath := config.SocketPath()
 		dataDir := config.DataDir()
+		socketDir := filepath.Dir(socketPath)
+		pidFile := filepath.Join(socketDir, "kmux.pid")
+		logFile := filepath.Join(dataDir, "daemon.log")
+
+		// Ensure directories exist
+		os.MkdirAll(socketDir, 0700)
+		os.MkdirAll(dataDir, 0700)
 
 		if foreground {
-			// Run in foreground
+			// Run in foreground with signal handling
 			fmt.Printf("Starting daemon (foreground) on %s\n", socketPath)
 			srv := server.New(socketPath, dataDir)
+
+			// Handle signals
+			sigChan := make(chan os.Signal, 1)
+			signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+			go func() {
+				<-sigChan
+				srv.Stop()
+			}()
+
 			return srv.Start()
 		}
 
 		// Daemonize
 		cntxt := &daemon.Context{
-			PidFileName: "",
+			PidFileName: pidFile,
 			PidFilePerm: 0644,
-			LogFileName: "",
-			WorkDir:     "/",
+			LogFileName: logFile,
+			LogFilePerm: 0640,
+			WorkDir:     dataDir,
 			Umask:       027,
 		}
 
@@ -46,13 +66,21 @@ var daemonStartCmd = &cobra.Command{
 			return fmt.Errorf("daemonize: %w", err)
 		}
 		if d != nil {
-			// Parent process
+			// Parent process - daemon started successfully
 			return nil
 		}
 		defer cntxt.Release()
 
-		// Child process - run server
+		// Child process (daemon) - set up signal handling
 		srv := server.New(socketPath, dataDir)
+
+		sigChan := make(chan os.Signal, 1)
+		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+		go func() {
+			<-sigChan
+			srv.Stop()
+		}()
+
 		return srv.Start()
 	},
 }

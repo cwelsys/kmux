@@ -190,7 +190,7 @@ func (s *Server) initState() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Get running zmx sessions
+	// Get running zmx sessions and extract session names
 	zmxSessions, _ := s.zmx.List()
 	zmxBySession := make(map[string]bool)
 	for _, z := range zmxSessions {
@@ -203,9 +203,33 @@ func (s *Server) initState() {
 		}
 	}
 
-	// Load saved sessions from disk
+	// First: create entries for ALL running zmx sessions
+	for name := range zmxBySession {
+		// Try to load from disk for pane count
+		panes := 1 // default if no save file
+		if sess, err := s.store.LoadSession(name); err == nil {
+			panes = 0
+			for _, tab := range sess.Tabs {
+				panes += len(tab.Windows)
+			}
+		}
+
+		s.state.Sessions[name] = &SessionState{
+			Name:     name,
+			Status:   "detached", // running zmx but no kitty windows
+			Panes:    panes,
+			ZmxAlive: true,
+			LastSeen: time.Now(),
+		}
+	}
+
+	// Second: add saved sessions that don't have running zmx
 	saved, _ := s.store.ListSessions()
 	for _, name := range saved {
+		if zmxBySession[name] {
+			continue // already added above
+		}
+
 		sess, err := s.store.LoadSession(name)
 		if err != nil {
 			continue
@@ -216,18 +240,11 @@ func (s *Server) initState() {
 			panes += len(tab.Windows)
 		}
 
-		status := "saved"
-		zmxAlive := zmxBySession[name]
-		if zmxAlive {
-			// Has running zmx processes but no windows (detached)
-			status = "detached"
-		}
-
 		s.state.Sessions[name] = &SessionState{
 			Name:     name,
-			Status:   status,
+			Status:   "saved",
 			Panes:    panes,
-			ZmxAlive: zmxAlive,
+			ZmxAlive: false,
 			LastSeen: time.Now(),
 		}
 	}
@@ -471,6 +488,17 @@ func (s *Server) pollState() {
 	// Poll zmx
 	zmxSessions, _ := s.zmx.List()
 
+	// Extract session names from zmx
+	zmxBySession := make(map[string]bool)
+	for _, z := range zmxSessions {
+		for i, c := range z {
+			if c == '.' {
+				zmxBySession[z[:i]] = true
+				break
+			}
+		}
+	}
+
 	// Update state
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -478,30 +506,39 @@ func (s *Server) pollState() {
 	s.state.ZmxSessions = zmxSessions
 	s.state.LastPoll = time.Now()
 
-	// Update existing sessions based on zmx state
-	for name, sess := range s.state.Sessions {
-		sess.ZmxAlive = false
-		for _, z := range zmxSessions {
-			if len(z) > len(name) && z[:len(name)+1] == name+"." {
-				sess.ZmxAlive = true
-				break
+	// Discover new zmx sessions
+	for name := range zmxBySession {
+		if _, exists := s.state.Sessions[name]; !exists {
+			s.state.Sessions[name] = &SessionState{
+				Name:     name,
+				Status:   "detached",
+				Panes:    1,
+				ZmxAlive: true,
+				LastSeen: time.Now(),
 			}
 		}
+	}
+
+	// Update existing sessions based on zmx state
+	for name, sess := range s.state.Sessions {
+		sess.ZmxAlive = zmxBySession[name]
 
 		// Update status based on zmx state
-		// Note: we can't track kitty windows without a specific kitty socket
-		// The polling loop checks zmx; kitty state is updated per-request
 		if sess.ZmxAlive {
 			if sess.Status == "saved" {
 				sess.Status = "detached"
 			}
+			sess.LastSeen = time.Now()
 		} else {
-			if sess.Status != "saved" {
+			// No zmx running - check if save file exists
+			if _, err := s.store.LoadSession(name); err != nil {
+				// No zmx, no save file - remove ghost session
+				delete(s.state.Sessions, name)
+			} else {
 				sess.Status = "saved"
+				sess.LastSeen = time.Now()
 			}
 		}
-
-		sess.LastSeen = time.Now()
 	}
 }
 
