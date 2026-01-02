@@ -303,36 +303,15 @@ func (s *Server) handleAttach(k *kitty.Client, params protocol.AttachParams) pro
 	// Clear ZmxSessions before rebuilding
 	session.ZmxSessions = nil
 
-	// Create windows in kitty
+	// Create windows in kitty using RestoreTab
 	var firstWindowID int
 	for tabIdx, tab := range session.Tabs {
-		for winIdx, win := range tab.Windows {
-			zmxName := session.ZmxSessionName(tabIdx, winIdx)
-			zmxCmd := zmx.AttachCmd(zmxName, win.Command)
-
-			launchType := "tab"
-			if winIdx > 0 {
-				launchType = "window"
-			}
-
-			opts := kitty.LaunchOpts{
-				Type:  launchType,
-				CWD:   win.CWD,
-				Title: tab.Title,
-				Cmd:   zmxCmd,
-				Env:   map[string]string{"KMUX_SESSION": name},
-			}
-
-			windowID, err := k.Launch(opts)
-			if err != nil {
-				return protocol.ErrorResponse(fmt.Sprintf("launch window: %v", err))
-			}
-
-			if tabIdx == 0 && winIdx == 0 {
-				firstWindowID = windowID
-			}
-
-			session.ZmxSessions = append(session.ZmxSessions, zmxName)
+		windowID, err := manager.RestoreTab(k, session, tabIdx, tab)
+		if err != nil {
+			return protocol.ErrorResponse(fmt.Sprintf("restore tab: %v", err))
+		}
+		if tabIdx == 0 {
+			firstWindowID = windowID
 		}
 	}
 
