@@ -238,7 +238,7 @@ func (s *Server) ensureKittyClient() *kitty.Client {
 	return nil
 }
 
-// initState loads saved sessions and reconciles with running zmx processes
+// initState discovers running zmx sessions only (not save files)
 func (s *Server) initState() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -256,48 +256,25 @@ func (s *Server) initState() {
 		}
 	}
 
-	// First: create entries for ALL running zmx sessions
+	// Only create entries for running zmx sessions
 	for name := range zmxBySession {
-		// Try to load from disk for pane count
-		panes := 1 // default if no save file
-		if sess, err := s.store.LoadSession(name); err == nil {
-			panes = 0
-			for _, tab := range sess.Tabs {
-				panes += len(tab.Windows)
+		// Count panes from zmx processes
+		panes := 0
+		prefix := name + "."
+		for _, z := range zmxSessions {
+			if len(z) > len(prefix) && z[:len(prefix)] == prefix {
+				panes++
 			}
 		}
+		if panes == 0 {
+			panes = 1
+		}
 
 		s.state.Sessions[name] = &SessionState{
 			Name:     name,
-			Status:   "detached", // running zmx but no kitty windows
+			Status:   "detached", // running zmx but no kitty windows yet
 			Panes:    panes,
 			ZmxAlive: true,
-			LastSeen: time.Now(),
-		}
-	}
-
-	// Second: add saved sessions that don't have running zmx
-	saved, _ := s.store.ListSessions()
-	for _, name := range saved {
-		if zmxBySession[name] {
-			continue // already added above
-		}
-
-		sess, err := s.store.LoadSession(name)
-		if err != nil {
-			continue
-		}
-
-		panes := 0
-		for _, tab := range sess.Tabs {
-			panes += len(tab.Windows)
-		}
-
-		s.state.Sessions[name] = &SessionState{
-			Name:     name,
-			Status:   "saved",
-			Panes:    panes,
-			ZmxAlive: false,
 			LastSeen: time.Now(),
 		}
 	}

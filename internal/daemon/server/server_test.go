@@ -89,19 +89,9 @@ func TestServer_Ping(t *testing.T) {
 func TestServer_Sessions(t *testing.T) {
 	tmpDir := t.TempDir()
 	socketPath := filepath.Join(tmpDir, "test.sock")
-	dataDir := filepath.Join(tmpDir, "data")
 
-	// Create a saved session
-	st := store.New(dataDir)
-	sess := &model.Session{
-		Name: "testsession",
-		Tabs: []model.Tab{{Windows: []model.Window{{CWD: "/tmp"}}}},
-	}
-	if err := st.SaveSession(sess); err != nil {
-		t.Fatalf("save session: %v", err)
-	}
-
-	srv := New(socketPath, dataDir)
+	// No saved sessions, no zmx - should return empty list
+	srv := New(socketPath, tmpDir)
 	go srv.Start()
 	defer srv.Stop()
 	time.Sleep(50 * time.Millisecond)
@@ -126,10 +116,56 @@ func TestServer_Sessions(t *testing.T) {
 	var sessions []protocol.SessionInfo
 	json.Unmarshal(resp.Result, &sessions)
 
-	if len(sessions) != 1 {
-		t.Fatalf("got %d sessions, want 1", len(sessions))
+	// Should be empty - no zmx running
+	if len(sessions) != 0 {
+		t.Errorf("got %d sessions, want 0", len(sessions))
 	}
-	if sessions[0].Name != "testsession" {
-		t.Errorf("got name %q, want testsession", sessions[0].Name)
+}
+
+func TestServer_ExcludeSaved(t *testing.T) {
+	tmpDir := t.TempDir()
+	socketPath := filepath.Join(tmpDir, "test.sock")
+	dataDir := filepath.Join(tmpDir, "data")
+
+	// Create a saved session (no zmx running)
+	st := store.New(dataDir)
+	sess := &model.Session{
+		Name: "testsession",
+		Tabs: []model.Tab{{Windows: []model.Window{{CWD: "/tmp"}}}},
+	}
+	if err := st.SaveSession(sess); err != nil {
+		t.Fatalf("save session: %v", err)
+	}
+
+	srv := New(socketPath, dataDir)
+	go srv.Start()
+	defer srv.Stop()
+	time.Sleep(50 * time.Millisecond)
+
+	// Request sessions WITHOUT --all
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	req, _ := protocol.NewRequestWithParams(protocol.MethodSessions, "", protocol.SessionsParams{
+		IncludeRestorePoints: false,
+	})
+	json.NewEncoder(conn).Encode(req)
+
+	var resp protocol.Response
+	json.NewDecoder(conn).Decode(&resp)
+
+	if resp.Error != "" {
+		t.Fatalf("error: %s", resp.Error)
+	}
+
+	var sessions []protocol.SessionInfo
+	json.Unmarshal(resp.Result, &sessions)
+
+	// Should be empty - no zmx running, just a save file
+	if len(sessions) != 0 {
+		t.Errorf("got %d sessions, want 0 (saved sessions should be excluded)", len(sessions))
 	}
 }
