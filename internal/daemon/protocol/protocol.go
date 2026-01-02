@@ -28,9 +28,10 @@ type Response struct {
 
 // SessionInfo is returned by the sessions method.
 type SessionInfo struct {
-	Name   string `json:"name"`
-	Status string `json:"status"` // "attached", "detached", "saved"
-	Panes  int    `json:"panes"`
+	Name           string `json:"name"`
+	Status         string `json:"status"` // "attached", "detached"
+	Panes          int    `json:"panes"`
+	IsRestorePoint bool   `json:"is_restore_point,omitempty"`
 }
 
 // SessionsParams for sessions method.

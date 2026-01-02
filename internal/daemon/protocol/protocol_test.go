@@ -63,3 +63,26 @@ func TestSessionsParams(t *testing.T) {
 		t.Error("IncludeRestorePoints should be true")
 	}
 }
+
+func TestSessionInfo_RestorePoint(t *testing.T) {
+	info := SessionInfo{
+		Name:           "test",
+		Status:         "saved",
+		Panes:          2,
+		IsRestorePoint: true,
+	}
+
+	data, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded SessionInfo
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if !decoded.IsRestorePoint {
+		t.Error("IsRestorePoint should be true")
+	}
+}
