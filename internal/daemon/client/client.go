@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"time"
 
+	"github.com/cwel/kmux/internal/config"
 	"github.com/cwel/kmux/internal/daemon/protocol"
 )
 
@@ -19,9 +20,15 @@ type Client struct {
 
 // New creates a new daemon client.
 func New(socketPath string) *Client {
+	// Config socket overrides KITTY_LISTEN_ON if set
+	kittySocket := os.Getenv("KITTY_LISTEN_ON")
+	if cfg, err := config.LoadConfig(); err == nil && cfg.Kitty.Socket != "" {
+		kittySocket = cfg.Kitty.Socket
+	}
+
 	return &Client{
 		socketPath:  socketPath,
-		kittySocket: os.Getenv("KITTY_LISTEN_ON"),
+		kittySocket: kittySocket,
 	}
 }
 
