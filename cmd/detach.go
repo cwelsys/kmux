@@ -23,7 +23,17 @@ Otherwise uses $KMUX_SESSION from the environment.`,
 		if len(args) > 0 {
 			sessionName = args[0]
 		} else {
-			sessionName = os.Getenv("KMUX_SESSION")
+			// Try to resolve session from current window
+			windowIDStr := os.Getenv("KITTY_WINDOW_ID")
+			if windowIDStr != "" {
+				var windowID int
+				if _, err := fmt.Sscanf(windowIDStr, "%d", &windowID); err == nil {
+					c := client.New(config.SocketPath())
+					if err := c.EnsureRunning(); err == nil {
+						sessionName, _ = c.Resolve(windowID)
+					}
+				}
+			}
 		}
 
 		if sessionName == "" {

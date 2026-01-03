@@ -36,7 +36,17 @@ Use --session to specify which session to split (for scripting outside sessions)
 		cwd, _ := os.Getwd()
 		sessionName := splitSession
 		if sessionName == "" {
-			sessionName = os.Getenv("KMUX_SESSION") // empty = native split
+			// Try to resolve session from current window
+			windowIDStr := os.Getenv("KITTY_WINDOW_ID")
+			if windowIDStr != "" {
+				var windowID int
+				if _, err := fmt.Sscanf(windowIDStr, "%d", &windowID); err == nil {
+					c := client.New(config.SocketPath())
+					if err := c.EnsureRunning(); err == nil {
+						sessionName, _ = c.Resolve(windowID)
+					}
+				}
+			}
 		}
 
 		// All splits go through daemon - it discovers the kitty socket
