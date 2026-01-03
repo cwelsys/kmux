@@ -29,6 +29,7 @@ type SessionState struct {
 
 type DaemonState struct {
 	Sessions     map[string]*SessionState
+	Mappings     map[int]string // kitty_window_id -> zmx_name (AUTHORITATIVE)
 	KittyState   kitty.KittyState
 	ZmxSessions  []string
 	LastPoll     time.Time
@@ -64,6 +65,7 @@ func New(socketPath, dataDir string) *Server {
 		cfg:        config.DefaultConfig(),
 		state: &DaemonState{
 			Sessions: make(map[string]*SessionState),
+			Mappings: make(map[int]string),
 		},
 	}
 }
