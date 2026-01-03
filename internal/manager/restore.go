@@ -6,6 +6,18 @@ import (
 	"github.com/cwel/kmux/internal/zmx"
 )
 
+// isSimpleLayout returns true for kitty built-in layouts that don't need a SplitRoot tree.
+func isSimpleLayout(layout string) bool {
+	simple := map[string]bool{
+		"tall":       true,
+		"fat":        true,
+		"grid":       true,
+		"horizontal": true,
+		"vertical":   true,
+	}
+	return simple[layout]
+}
+
 // WindowCreate holds info about a created window for mapping.
 type WindowCreate struct {
 	KittyWindowID int
@@ -108,6 +120,31 @@ func RestoreTab(
 
 		session.ZmxSessions = append(session.ZmxSessions, zmxName)
 		return nil
+	}
+
+	// Handle simple kitty layouts (tall, fat, grid, horizontal, vertical)
+	// These layouts don't need a SplitRoot tree - kitty arranges windows automatically
+	if isSimpleLayout(tab.Layout) && tab.SplitRoot == nil {
+		for i, win := range tab.Windows {
+			if i == 0 {
+				// Create first window as a new tab
+				if err := createWindow(win, "tab"); err != nil {
+					return nil, 0, err
+				}
+				// Set layout before creating additional windows
+				if len(tab.Windows) > 1 {
+					if err := k.GotoLayout(tab.Layout); err != nil {
+						return nil, 0, err
+					}
+				}
+			} else {
+				// Subsequent windows - kitty places according to layout
+				if err := createWindow(win, "window"); err != nil {
+					return nil, 0, err
+				}
+			}
+		}
+		return creations, firstWindowID, nil
 	}
 
 	// Handle single window (no splits)

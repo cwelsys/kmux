@@ -158,3 +158,21 @@ func (c *Client) CloseTab(id int) error {
 	}
 	return nil
 }
+
+// GotoLayout changes the layout of the active tab.
+func (c *Client) GotoLayout(layout string) error {
+	args := []string{"@"}
+	if c.socketPath != "" {
+		args = append(args, "--to", "unix:"+c.socketPath)
+	}
+	args = append(args, "goto-layout", layout)
+
+	cmd := exec.Command("kitty", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("kitty @ goto-layout: %w: %s", err, stderr.String())
+	}
+	return nil
+}
