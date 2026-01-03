@@ -202,3 +202,52 @@ func (c *Client) Split(session, direction, cwd string) (int, error) {
 
 	return result.WindowID, nil
 }
+
+// Resolve looks up which session owns a window.
+func (c *Client) Resolve(windowID int) (string, error) {
+	req, err := protocol.NewRequestWithParams(protocol.MethodResolve, c.kittySocket, protocol.ResolveParams{
+		WindowID: windowID,
+	})
+	if err != nil {
+		return "", err
+	}
+
+	resp, err := c.call(req)
+	if err != nil {
+		return "", err
+	}
+
+	var result protocol.ResolveResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return "", fmt.Errorf("unmarshal: %w", err)
+	}
+
+	return result.Session, nil
+}
+
+// Rename renames a session.
+func (c *Client) Rename(oldName, newName string) error {
+	req, err := protocol.NewRequestWithParams(protocol.MethodRename, c.kittySocket, protocol.RenameParams{
+		OldName: oldName,
+		NewName: newName,
+	})
+	if err != nil {
+		return err
+	}
+
+	resp, err := c.call(req)
+	if err != nil {
+		return err
+	}
+
+	var result protocol.RenameResult
+	if err := json.Unmarshal(resp.Result, &result); err != nil {
+		return fmt.Errorf("unmarshal: %w", err)
+	}
+
+	if !result.Success {
+		return fmt.Errorf("rename failed: %s", result.Message)
+	}
+
+	return nil
+}
