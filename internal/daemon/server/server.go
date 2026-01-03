@@ -745,10 +745,9 @@ func (s *Server) handleRename(params protocol.RenameParams) protocol.Response {
 	s.mu.Unlock()
 
 	// Rename save file
-	// TODO: Uncomment in Task 8 when RenameSession is implemented
-	// if err := s.store.RenameSession(oldName, newName); err != nil {
-	// 	// Non-fatal - session might not have a save file yet
-	// }
+	if err := s.store.RenameSession(oldName, newName); err != nil {
+		// Non-fatal - session might not have a save file yet
+	}
 
 	return protocol.SuccessResponse(protocol.RenameResult{
 		Success: true,
