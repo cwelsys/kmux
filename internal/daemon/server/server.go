@@ -416,12 +416,14 @@ func (s *Server) handleAttach(k *kitty.Client, params protocol.AttachParams) pro
 
 	// Create windows in kitty using RestoreTab
 	var firstWindowID int
+	var allCreations []manager.WindowCreate
 	for tabIdx, tab := range session.Tabs {
-		windowID, err := manager.RestoreTab(k, session, tabIdx, tab)
+		creations, windowID, err := manager.RestoreTab(k, session, tabIdx, tab)
 		if err != nil {
 			return protocol.ErrorResponse(fmt.Sprintf("restore tab: %v", err))
 		}
-		if tabIdx == 0 {
+		allCreations = append(allCreations, creations...)
+		if tabIdx == 0 && windowID > 0 {
 			firstWindowID = windowID
 		}
 	}
@@ -431,13 +433,12 @@ func (s *Server) handleAttach(k *kitty.Client, params protocol.AttachParams) pro
 		k.FocusWindow(firstWindowID)
 	}
 
-	// Save session to disk
-	if err := s.store.SaveSession(session); err != nil {
-		return protocol.ErrorResponse(fmt.Sprintf("save session: %v", err))
-	}
-
-	// Update internal state
+	// RECORD all mappings
 	s.mu.Lock()
+	for _, c := range allCreations {
+		s.state.Mappings[c.KittyWindowID] = c.ZmxName
+	}
+	// Update session state
 	panes := 0
 	for _, tab := range session.Tabs {
 		panes += len(tab.Windows)
@@ -450,6 +451,11 @@ func (s *Server) handleAttach(k *kitty.Client, params protocol.AttachParams) pro
 		LastSeen: time.Now(),
 	}
 	s.mu.Unlock()
+
+	// Save session to disk
+	if err := s.store.SaveSession(session); err != nil {
+		return protocol.ErrorResponse(fmt.Sprintf("save session: %v", err))
+	}
 
 	return protocol.SuccessResponse(protocol.AttachResult{
 		Success: true,
