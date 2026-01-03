@@ -6,6 +6,12 @@ import (
 	"github.com/cwel/kmux/internal/zmx"
 )
 
+// WindowCreate holds info about a created window for mapping.
+type WindowCreate struct {
+	KittyWindowID int
+	ZmxName       string
+}
+
 // RestoreCallback is called for each window to be created.
 // launchType is "tab" for first window, "hsplit" or "vsplit" for splits.
 type RestoreCallback func(win model.Window, launchType string)
@@ -46,19 +52,24 @@ func traverseForRestore(node *model.SplitNode, parentSplit string, windows []mod
 }
 
 // RestoreTab creates kitty windows for a tab with split layout.
-// Returns the first window ID for focusing.
+// Returns the window creations for mapping and the first window ID for focusing.
 func RestoreTab(
 	k *kitty.Client,
 	session *model.Session,
 	tabIdx int,
 	tab model.Tab,
-) (int, error) {
+) ([]WindowCreate, int, error) {
+	var creations []WindowCreate
 	var firstWindowID int
 	var lastWindowID int
 	windowIdx := 0
 
 	createWindow := func(win model.Window, launchType string) error {
-		zmxName := session.ZmxSessionName(tabIdx, windowIdx)
+		// Use saved ZmxName if available, otherwise generate
+		zmxName := win.ZmxName
+		if zmxName == "" {
+			zmxName = session.ZmxSessionName(tabIdx, windowIdx)
+		}
 		zmxCmd := zmx.AttachCmd(zmxName, win.Command)
 
 		// Convert launchType to kitty location
@@ -83,6 +94,12 @@ func RestoreTab(
 			return err
 		}
 
+		// Record creation for mapping
+		creations = append(creations, WindowCreate{
+			KittyWindowID: id,
+			ZmxName:       zmxName,
+		})
+
 		if windowIdx == 0 {
 			firstWindowID = id
 		}
@@ -97,10 +114,10 @@ func RestoreTab(
 	if tab.SplitRoot == nil || len(tab.Windows) <= 1 {
 		for _, win := range tab.Windows {
 			if err := createWindow(win, "tab"); err != nil {
-				return 0, err
+				return nil, 0, err
 			}
 		}
-		return firstWindowID, nil
+		return creations, firstWindowID, nil
 	}
 
 	// Traverse split tree
@@ -119,5 +136,5 @@ func RestoreTab(
 		restoreErr = createWindow(win, launchType)
 	})
 
-	return firstWindowID, restoreErr
+	return creations, firstWindowID, restoreErr
 }
