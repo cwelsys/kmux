@@ -64,12 +64,20 @@ func New(socketPath, dataDir string) *Server {
 		cfg = config.DefaultConfig()
 	}
 
+	// Use config socket if specified, otherwise default
+	var kittyClient *kitty.Client
+	if cfg.Kitty.Socket != "" {
+		kittyClient = kitty.NewClientWithSocket(cfg.Kitty.Socket)
+	} else {
+		kittyClient = kitty.NewClient()
+	}
+
 	return &Server{
 		socketPath: socketPath,
 		dataDir:    dataDir,
 		done:       make(chan struct{}),
 		store:      store.New(dataDir),
-		kitty:      kitty.NewClient(),
+		kitty:      kittyClient,
 		zmx:        zmx.NewClient(),
 		cfg:        cfg,
 		state: &DaemonState{
