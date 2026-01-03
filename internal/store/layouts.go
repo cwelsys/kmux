@@ -77,3 +77,24 @@ func ListLayouts() ([]string, error) {
 
 	return layouts, nil
 }
+
+// InstallBundledLayouts writes bundled layouts to the data directory.
+func InstallBundledLayouts() error {
+	layoutDir := filepath.Join(config.DataDir(), "layouts")
+	if err := os.MkdirAll(layoutDir, 0755); err != nil {
+		return err
+	}
+
+	for name, content := range BundledLayouts {
+		path := filepath.Join(layoutDir, name+".yaml")
+		// Don't overwrite existing
+		if _, err := os.Stat(path); err == nil {
+			continue
+		}
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			return fmt.Errorf("write %s: %w", name, err)
+		}
+	}
+
+	return nil
+}

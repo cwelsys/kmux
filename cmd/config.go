@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/cwel/kmux/internal/config"
+	"github.com/cwel/kmux/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -56,6 +57,13 @@ auto_save_interval = 900
 		}
 
 		fmt.Printf("Created config at %s\n", configPath)
+
+		// Install bundled layouts
+		if err := store.InstallBundledLayouts(); err != nil {
+			return fmt.Errorf("install bundled layouts: %w", err)
+		}
+		fmt.Printf("Installed bundled layouts to %s\n", filepath.Join(config.DataDir(), "layouts"))
+
 		return nil
 	},
 }

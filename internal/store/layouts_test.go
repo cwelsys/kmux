@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/cwel/kmux/internal/config"
 )
 
 func TestLoadLayout(t *testing.T) {
@@ -97,5 +99,54 @@ tabs:
 	// Should load user version
 	if layout.Description != "User version" {
 		t.Errorf("Description = %q, want %q", layout.Description, "User version")
+	}
+}
+
+func TestBundledLayoutsValid(t *testing.T) {
+	for name, content := range BundledLayouts {
+		layout, err := config.ParseLayout([]byte(content))
+		if err != nil {
+			t.Errorf("BundledLayouts[%q] failed to parse: %v", name, err)
+			continue
+		}
+		if err := layout.Validate(); err != nil {
+			t.Errorf("BundledLayouts[%q] failed validation: %v", name, err)
+		}
+		if layout.Name != name {
+			t.Errorf("BundledLayouts[%q] has mismatched name in YAML: %q", name, layout.Name)
+		}
+	}
+}
+
+func TestInstallBundledLayouts(t *testing.T) {
+	dataDir := t.TempDir()
+	os.Setenv("KMUX_DATA_DIR", dataDir)
+	defer os.Unsetenv("KMUX_DATA_DIR")
+
+	// Install bundled layouts
+	if err := InstallBundledLayouts(); err != nil {
+		t.Fatalf("InstallBundledLayouts() error = %v", err)
+	}
+
+	// Verify files were created
+	layoutDir := filepath.Join(dataDir, "layouts")
+	for name := range BundledLayouts {
+		path := filepath.Join(layoutDir, name+".yaml")
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("expected layout file %q to exist", path)
+		}
+	}
+
+	// Verify doesn't overwrite
+	testPath := filepath.Join(layoutDir, "tall.yaml")
+	originalContent, _ := os.ReadFile(testPath)
+
+	if err := InstallBundledLayouts(); err != nil {
+		t.Fatalf("InstallBundledLayouts() second call error = %v", err)
+	}
+
+	newContent, _ := os.ReadFile(testPath)
+	if string(originalContent) != string(newContent) {
+		t.Error("InstallBundledLayouts() should not overwrite existing files")
 	}
 }
