@@ -24,8 +24,9 @@ func New(k *kitty.Client, z *zmx.Client, s *store.Store) *Manager {
 
 // DeriveSession creates a Session from current kitty state.
 // mappings provides the authoritative kitty_window_id -> zmx_name lookup.
-// Only captures windows that belong to this session (have KMUX_SESSION env set).
-func DeriveSession(name string, state kitty.KittyState, mappings map[int]string) *model.Session {
+// windowSessions provides the authoritative kitty_window_id -> session_name lookup.
+// Only captures windows that belong to this session.
+func DeriveSession(name string, state kitty.KittyState, mappings map[int]string, windowSessions map[int]string) *model.Session {
 	session := &model.Session{
 		Name:    name,
 		Host:    "local",
@@ -44,7 +45,7 @@ func DeriveSession(name string, state kitty.KittyState, mappings map[int]string)
 		var sessionWindows []model.Window
 
 		for _, win := range tab.Windows {
-			if win.Env["KMUX_SESSION"] != name {
+			if windowSessions[win.ID] != name {
 				continue
 			}
 			idx := len(sessionWindows)

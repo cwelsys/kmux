@@ -336,10 +336,18 @@ func (s *Server) handleSessions(k *kitty.Client, params protocol.SessionsParams)
 	kittyWindowsBySession := make(map[string]int) // session name -> window count
 	if k != nil {
 		if state, err := k.GetState(); err == nil && len(state) > 0 {
+			// Copy WindowSessions to avoid holding lock during iteration
+			s.mu.Lock()
+			windowSessions := make(map[int]string)
+			for k, v := range s.state.WindowSessions {
+				windowSessions[k] = v
+			}
+			s.mu.Unlock()
+
 			for _, osWin := range state {
 				for _, tab := range osWin.Tabs {
 					for _, win := range tab.Windows {
-						if sessName := win.Env["KMUX_SESSION"]; sessName != "" {
+						if sessName := windowSessions[win.ID]; sessName != "" {
 							kittyWindowsBySession[sessName]++
 						}
 					}
@@ -494,9 +502,10 @@ func (s *Server) handleDetach(k *kitty.Client, params protocol.DetachParams) pro
 	// Derive session from current state using mappings
 	s.mu.Lock()
 	mappings := s.state.Mappings
+	windowSessions := s.state.WindowSessions
 	s.mu.Unlock()
 
-	session := manager.DeriveSession(name, state, mappings)
+	session := manager.DeriveSession(name, state, mappings, windowSessions)
 
 	// Save session
 	if err := s.store.SaveSession(session); err != nil {
@@ -507,7 +516,7 @@ func (s *Server) handleDetach(k *kitty.Client, params protocol.DetachParams) pro
 	if len(state) > 0 {
 		for _, tab := range state[0].Tabs {
 			for _, win := range tab.Windows {
-				if win.Env["KMUX_SESSION"] == name {
+				if s.state.WindowSessions[win.ID] == name {
 					k.CloseWindow(win.ID)
 				}
 			}
@@ -551,7 +560,7 @@ func (s *Server) handleKill(k *kitty.Client, params protocol.KillParams) protoco
 	if len(state) > 0 {
 		for _, tab := range state[0].Tabs {
 			for _, win := range tab.Windows {
-				if win.Env["KMUX_SESSION"] == name {
+				if s.state.WindowSessions[win.ID] == name {
 					k.CloseWindow(win.ID)
 				}
 			}
@@ -638,7 +647,7 @@ func (s *Server) handleSplit(k *kitty.Client, params protocol.SplitParams) proto
 		for _, tab := range osWin.Tabs {
 			var windowsInTab []int
 			for _, win := range tab.Windows {
-				if win.Env["KMUX_SESSION"] == sessionName {
+				if s.state.WindowSessions[win.ID] == sessionName {
 					windowsInTab = append(windowsInTab, win.ID)
 				}
 			}
@@ -805,16 +814,18 @@ func (s *Server) pollState() {
 			s.kitty = nil
 			s.mu.Unlock()
 		} else if len(kittyState) > 0 {
-			// Extract windows by KMUX_SESSION
+			// Build kittyWindowsBySession from WindowSessions (not from env vars)
+			s.mu.Lock()
 			for _, osWin := range kittyState {
 				for _, tab := range osWin.Tabs {
 					for _, win := range tab.Windows {
-						if sessName := win.Env["KMUX_SESSION"]; sessName != "" {
+						if sessName := s.state.WindowSessions[win.ID]; sessName != "" {
 							kittyWindowsBySession[sessName] = append(kittyWindowsBySession[sessName], win.ID)
 						}
 					}
 				}
 			}
+			s.mu.Unlock()
 		}
 	}
 
@@ -943,9 +954,10 @@ func (s *Server) autoSaveAll() {
 	for _, name := range attachedSessions {
 		s.mu.Lock()
 		mappings := s.state.Mappings
+		windowSessions := s.state.WindowSessions
 		s.mu.Unlock()
 
-		session := manager.DeriveSession(name, kittyState, mappings)
+		session := manager.DeriveSession(name, kittyState, mappings, windowSessions)
 		if len(session.Tabs) > 0 {
 			s.store.SaveSession(session)
 		}
@@ -957,13 +969,14 @@ func (s *Server) saveSession(name string) {
 	s.mu.Lock()
 	kittyState := s.state.KittyState
 	mappings := s.state.Mappings
+	windowSessions := s.state.WindowSessions
 	s.mu.Unlock()
 
 	if len(kittyState) == 0 {
 		return
 	}
 
-	session := manager.DeriveSession(name, kittyState, mappings)
+	session := manager.DeriveSession(name, kittyState, mappings, windowSessions)
 	if len(session.Tabs) > 0 {
 		s.store.SaveSession(session)
 	}
