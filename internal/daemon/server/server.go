@@ -28,12 +28,13 @@ type SessionState struct {
 }
 
 type DaemonState struct {
-	Sessions     map[string]*SessionState
-	Mappings     map[int]string // kitty_window_id -> zmx_name (AUTHORITATIVE)
-	KittyState   kitty.KittyState
-	ZmxSessions  []string
-	LastPoll     time.Time
-	LastAutoSave time.Time
+	Sessions       map[string]*SessionState
+	Mappings       map[int]string // kitty_window_id -> zmx_name (AUTHORITATIVE)
+	WindowSessions map[int]string // kitty_window_id -> session_name (AUTHORITATIVE)
+	KittyState     kitty.KittyState
+	ZmxSessions    []string
+	LastPoll       time.Time
+	LastAutoSave   time.Time
 }
 
 // Server is the kmux daemon server.
@@ -64,8 +65,9 @@ func New(socketPath, dataDir string) *Server {
 		zmx:        zmx.NewClient(),
 		cfg:        config.DefaultConfig(),
 		state: &DaemonState{
-			Sessions: make(map[string]*SessionState),
-			Mappings: make(map[int]string),
+			Sessions:       make(map[string]*SessionState),
+			Mappings:       make(map[int]string),
+			WindowSessions: make(map[int]string),
 		},
 	}
 }
