@@ -9,6 +9,8 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var splitSession string
+
 var splitCmd = &cobra.Command{
 	Use:   "split <direction>",
 	Short: "Create a split window",
@@ -17,7 +19,9 @@ var splitCmd = &cobra.Command{
 Direction must be 'vertical' (or 'v') for side-by-side, or 'horizontal' (or 'h') for stacked.
 
 If run from within a kmux session, creates a zmx-backed persistent split.
-If run outside a kmux session, creates a native kitty split.`,
+If run outside a kmux session, creates a native kitty split.
+
+Use --session to specify which session to split (for scripting outside sessions).`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		direction := args[0]
@@ -30,7 +34,10 @@ If run outside a kmux session, creates a native kitty split.`,
 		}
 
 		cwd, _ := os.Getwd()
-		sessionName := os.Getenv("KMUX_SESSION") // empty = native split
+		sessionName := splitSession
+		if sessionName == "" {
+			sessionName = os.Getenv("KMUX_SESSION") // empty = native split
+		}
 
 		// All splits go through daemon - it discovers the kitty socket
 		c := client.New(config.SocketPath())
@@ -50,5 +57,6 @@ If run outside a kmux session, creates a native kitty split.`,
 }
 
 func init() {
+	splitCmd.Flags().StringVarP(&splitSession, "session", "s", "", "Session to create split in (default: $KMUX_SESSION)")
 	rootCmd.AddCommand(splitCmd)
 }

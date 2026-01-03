@@ -301,35 +301,63 @@ func countZmxPanes(zmxSessions []string, sessionName string) int {
 }
 
 func (s *Server) handleSessions(k *kitty.Client, params protocol.SessionsParams) protocol.Response {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	// Query reality - zmx for running sessions, kitty for attached windows
+	zmxSessions, _ := s.zmx.List()
 
+	// Extract unique session names from zmx (format: session.tab.window)
+	zmxBySession := make(map[string]int) // session name -> pane count
+	for _, z := range zmxSessions {
+		for i, c := range z {
+			if c == '.' {
+				name := z[:i]
+				zmxBySession[name]++
+				break
+			}
+		}
+	}
+
+	// Query kitty for attached windows
+	kittyWindowsBySession := make(map[string]int) // session name -> window count
+	if k != nil {
+		if state, err := k.GetState(); err == nil && len(state) > 0 {
+			for _, osWin := range state {
+				for _, tab := range osWin.Tabs {
+					for _, win := range tab.Windows {
+						if sessName := win.Env["KMUX_SESSION"]; sessName != "" {
+							kittyWindowsBySession[sessName]++
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Build session list from reality
 	var sessions []protocol.SessionInfo
-
-	// Add running sessions
-	for _, sess := range s.state.Sessions {
+	for name, zmxCount := range zmxBySession {
+		kittyCount := kittyWindowsBySession[name]
+		status := "detached"
+		panes := zmxCount
+		if kittyCount > 0 {
+			status = "attached"
+			panes = kittyCount // prefer kitty count when attached
+		}
 		sessions = append(sessions, protocol.SessionInfo{
-			Name:           sess.Name,
-			Status:         sess.Status,
-			Panes:          sess.Panes,
+			Name:           name,
+			Status:         status,
+			Panes:          panes,
 			IsRestorePoint: false,
 		})
 	}
 
-	// Add restore points if requested
+	// Add restore points if requested (save files for sessions not currently running)
 	if params.IncludeRestorePoints {
 		saved, _ := s.store.ListSessions()
-		runningNames := make(map[string]bool)
-		for _, sess := range s.state.Sessions {
-			runningNames[sess.Name] = true
-		}
-
 		for _, name := range saved {
-			if runningNames[name] {
+			if _, running := zmxBySession[name]; running {
 				continue // already listed as running
 			}
 
-			// Load to get pane count
 			panes := 1
 			if sess, err := s.store.LoadSession(name); err == nil {
 				panes = 0
