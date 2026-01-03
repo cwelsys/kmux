@@ -35,6 +35,14 @@ var daemonStartCmd = &cobra.Command{
 		os.MkdirAll(socketDir, 0700)
 		os.MkdirAll(dataDir, 0700)
 
+		// Clean up stale state: if PID file exists but socket doesn't, daemon is dead
+		if _, err := os.Stat(pidFile); err == nil {
+			if _, err := os.Stat(socketPath); os.IsNotExist(err) {
+				// PID exists but socket doesn't - stale state
+				os.Remove(pidFile)
+			}
+		}
+
 		if foreground {
 			// Run in foreground with signal handling
 			fmt.Printf("Starting daemon (foreground) on %s\n", socketPath)
