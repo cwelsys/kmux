@@ -82,7 +82,8 @@ func RestoreTab(
 		if zmxName == "" {
 			zmxName = session.ZmxSessionName(tabIdx, windowIdx)
 		}
-		zmxCmd := zmx.AttachCmd(zmxName, win.Command)
+		// Pass session name for cleanup callback
+		zmxCmd := zmx.AttachCmd(zmxName, session.Name, win.Command)
 
 		// Convert launchType to kitty location
 		location := ""

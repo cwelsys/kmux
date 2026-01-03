@@ -220,6 +220,12 @@ func (s *Server) handleRequest(req protocol.Request) protocol.Response {
 			return protocol.ErrorResponse(fmt.Sprintf("invalid params: %v", err))
 		}
 		return s.handleRename(params)
+	case protocol.MethodWindowClosed:
+		var params protocol.WindowClosedParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return protocol.ErrorResponse(fmt.Sprintf("invalid params: %v", err))
+		}
+		return s.handleWindowClosed(params)
 	default:
 		return protocol.ErrorResponse(fmt.Sprintf("unknown method: %s", req.Method))
 	}
@@ -808,7 +814,7 @@ func (s *Server) handleSplit(k *kitty.Client, params protocol.SplitParams) proto
 
 	// Build zmx session name: {session}.{session_tab_idx}.{window_idx}
 	zmxName := fmt.Sprintf("%s.%d.%d", sessionName, sessionTabIdx, windowIdx)
-	zmxCmd := zmx.AttachCmd(zmxName, "")
+	zmxCmd := zmx.AttachCmd(zmxName, sessionName)
 
 	// Launch the split window with zmx
 	opts := kitty.LaunchOpts{
@@ -909,6 +915,57 @@ func (s *Server) handleRename(params protocol.RenameParams) protocol.Response {
 	})
 }
 
+func (s *Server) handleWindowClosed(params protocol.WindowClosedParams) protocol.Response {
+	log.Printf("[event] window closed: windowID=%d zmxName=%s session=%s",
+		params.WindowID, params.ZmxName, params.Session)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Remove from mappings
+	delete(s.state.Mappings, params.WindowID)
+	delete(s.state.WindowSessions, params.WindowID)
+
+	// Update session state
+	if sess, exists := s.state.Sessions[params.Session]; exists {
+		// Count remaining windows for this session
+		windowCount := 0
+		for _, sessName := range s.state.WindowSessions {
+			if sessName == params.Session {
+				windowCount++
+			}
+		}
+
+		if windowCount == 0 {
+			// Check if zmx sessions are still running
+			zmxSessions, _ := s.zmx.List()
+			zmxAlive := false
+			panes := 0
+			prefix := params.Session + "."
+			for _, z := range zmxSessions {
+				if len(z) > len(prefix) && z[:len(prefix)] == prefix {
+					zmxAlive = true
+					panes++
+				}
+			}
+
+			if zmxAlive {
+				sess.Status = "detached"
+				sess.Panes = panes
+				log.Printf("[event] session %s now detached (panes=%d)", params.Session, panes)
+			} else {
+				// No windows, no zmx - remove session
+				delete(s.state.Sessions, params.Session)
+				log.Printf("[event] session %s removed (no windows, no zmx)", params.Session)
+			}
+		} else {
+			sess.Panes = windowCount
+		}
+	}
+
+	return protocol.SuccessResponse(map[string]bool{"ok": true})
+}
+
 func (s *Server) runPollingLoop() {
 	pollTicker := time.NewTicker(time.Duration(s.cfg.Daemon.WatchInterval) * time.Second)
 	saveTicker := time.NewTicker(time.Duration(s.cfg.Daemon.AutoSaveInterval) * time.Second)
@@ -931,6 +988,7 @@ func (s *Server) runPollingLoop() {
 func (s *Server) pollState() {
 	// Poll zmx
 	zmxSessions, _ := s.zmx.List()
+	log.Printf("[poll] zmx sessions: %v", zmxSessions)
 
 	// Copy ZmxOwnership before using it
 	s.mu.Lock()
@@ -958,6 +1016,7 @@ func (s *Server) pollState() {
 			zmxBySession[name] = true
 		}
 	}
+	log.Printf("[poll] zmxBySession: %v", zmxBySession)
 
 	// Poll kitty - discover/verify socket each poll cycle
 	kittyClient := s.ensureKittyClient()
@@ -987,6 +1046,7 @@ func (s *Server) pollState() {
 				}
 			}
 			s.mu.Unlock()
+			log.Printf("[poll] kittyWindowsBySession: %v", kittyWindowsBySession)
 		}
 	}
 
@@ -1014,6 +1074,7 @@ func (s *Server) pollState() {
 				ZmxAlive: true,
 				LastSeen: time.Now(),
 			}
+			log.Printf("[poll] discovered session %s from zmx (panes=%d)", name, panes)
 		}
 	}
 
@@ -1038,6 +1099,7 @@ func (s *Server) pollState() {
 		sess.WindowIDs = windowIDs
 
 		// Update pane count from windows or zmx
+		oldPanes := sess.Panes
 		if len(windowIDs) > 0 {
 			sess.Panes = len(windowIDs)
 		} else if sess.ZmxAlive {
@@ -1048,6 +1110,7 @@ func (s *Server) pollState() {
 		// Determine status
 		hasWindows := len(windowIDs) > 0
 		prevHadWindows := len(prevWindowIDs[name]) > 0
+		oldStatus := sess.Status
 
 		if hasWindows {
 			sess.Status = "attached"
@@ -1056,12 +1119,20 @@ func (s *Server) pollState() {
 			// Windows disappeared but zmx still running - save immediately
 			if prevHadWindows {
 				sessionsToSave = append(sessionsToSave, name)
+				log.Printf("[poll] session %s: windows closed, will save", name)
 			}
 			sess.Status = "detached"
 			sess.LastSeen = time.Now()
 		} else {
 			// No windows, no zmx - session is gone
+			log.Printf("[poll] session %s: removed (no windows, no zmx)", name)
 			delete(s.state.Sessions, name)
+		}
+
+		// Log state changes
+		if oldStatus != sess.Status || oldPanes != sess.Panes {
+			log.Printf("[poll] session %s: %s/%d -> %s/%d (zmxAlive=%v, windows=%v)",
+				name, oldStatus, oldPanes, sess.Status, sess.Panes, sess.ZmxAlive, windowIDs)
 		}
 	}
 

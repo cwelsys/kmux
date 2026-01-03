@@ -4,15 +4,16 @@ import "encoding/json"
 
 // Method constants
 const (
-	MethodPing     = "ping"
-	MethodSessions = "sessions"
-	MethodAttach   = "attach"
-	MethodDetach   = "detach"
-	MethodKill     = "kill"
-	MethodShutdown = "shutdown"
-	MethodSplit    = "split"
-	MethodResolve  = "resolve"
-	MethodRename   = "rename"
+	MethodPing         = "ping"
+	MethodSessions     = "sessions"
+	MethodAttach       = "attach"
+	MethodDetach       = "detach"
+	MethodKill         = "kill"
+	MethodShutdown     = "shutdown"
+	MethodSplit        = "split"
+	MethodResolve      = "resolve"
+	MethodRename       = "rename"
+	MethodWindowClosed = "window_closed"
 )
 
 // Request is an RPC request.
@@ -98,6 +99,13 @@ type RenameParams struct {
 type RenameResult struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
+}
+
+// WindowClosedParams for window_closed method.
+type WindowClosedParams struct {
+	WindowID int    `json:"window_id"` // kitty window ID
+	ZmxName  string `json:"zmx_name"`  // zmx session name
+	Session  string `json:"session"`   // kmux session name
 }
 
 // SuccessResponse creates a success response with the given result.

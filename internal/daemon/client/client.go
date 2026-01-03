@@ -259,3 +259,18 @@ func (c *Client) Rename(oldName, newName string) error {
 
 	return nil
 }
+
+// NotifyWindowClosed notifies the daemon that a window was closed.
+func (c *Client) NotifyWindowClosed(windowID int, zmxName, session string) error {
+	req, err := protocol.NewRequestWithParams(protocol.MethodWindowClosed, c.kittySocket, protocol.WindowClosedParams{
+		WindowID: windowID,
+		ZmxName:  zmxName,
+		Session:  session,
+	})
+	if err != nil {
+		return err
+	}
+
+	_, err = c.call(req)
+	return err
+}

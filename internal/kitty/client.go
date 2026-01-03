@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os/exec"
 )
 
@@ -78,6 +79,7 @@ func (c *Client) Launch(opts LaunchOpts) (int, error) {
 		args = append(args, opts.Cmd...)
 	}
 
+	log.Printf("[kitty] Launch: args=%v", args)
 	cmd := exec.Command("kitty", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
