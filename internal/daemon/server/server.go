@@ -669,6 +669,7 @@ func (s *Server) handleSplit(k *kitty.Client, params protocol.SplitParams) proto
 	// RECORD the mapping - this is the authoritative source
 	s.mu.Lock()
 	s.state.Mappings[windowID] = zmxName
+	s.state.WindowSessions[windowID] = sessionName // RECORD session membership
 	if sess, ok := s.state.Sessions[sessionName]; ok {
 		sess.Panes++
 		sess.LastSeen = time.Now()
