@@ -7,7 +7,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 	"time"
 
@@ -226,6 +225,10 @@ func (s *Server) handleRequest(req protocol.Request) protocol.Response {
 			return protocol.ErrorResponse(fmt.Sprintf("invalid params: %v", err))
 		}
 		return s.handleWindowClosed(params)
+	case protocol.MethodCloseFocused:
+		return s.handleCloseFocused(k)
+	case protocol.MethodCloseTab:
+		return s.handleCloseTab(k)
 	default:
 		return protocol.ErrorResponse(fmt.Sprintf("unknown method: %s", req.Method))
 	}
@@ -288,41 +291,60 @@ func (s *Server) ensureKittyClient() *kitty.Client {
 	return nil
 }
 
-// initState discovers running zmx sessions only (not save files)
+// initState loads persisted daemon state and verifies against reality.
+// The persisted state is AUTHORITATIVE - zmx/kitty are queried for verification only.
 func (s *Server) initState() {
+	// Load persisted state first
+	persisted, err := s.loadState()
+	if err != nil {
+		log.Printf("[init] WARNING: failed to load persisted state: %v", err)
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Get running zmx sessions and extract session names
-	zmxSessions, _ := s.zmx.List()
-	zmxBySession := make(map[string]bool)
-	for _, z := range zmxSessions {
-		// Extract session name from "sessionname.tab.window"
-		for i, c := range z {
-			if c == '.' {
-				zmxBySession[z[:i]] = true
-				break
-			}
+	// Restore persisted mappings
+	if persisted != nil {
+		log.Printf("[init] loaded persisted state from %v", persisted.LastSaved)
+		for k, v := range persisted.Mappings {
+			s.state.Mappings[k] = v
+		}
+		for k, v := range persisted.WindowSessions {
+			s.state.WindowSessions[k] = v
+		}
+		for k, v := range persisted.ZmxOwnership {
+			s.state.ZmxOwnership[k] = v
 		}
 	}
 
-	// Only create entries for running zmx sessions
-	for name := range zmxBySession {
-		// Count panes from zmx processes
-		panes := 0
-		prefix := name + "."
-		for _, z := range zmxSessions {
-			if len(z) > len(prefix) && z[:len(prefix)] == prefix {
-				panes++
-			}
-		}
-		if panes == 0 {
-			panes = 1
-		}
+	// Query zmx for verification
+	zmxSessions, _ := s.zmx.List()
+	zmxSet := make(map[string]bool)
+	for _, z := range zmxSessions {
+		zmxSet[z] = true
+	}
 
+	// Build session states from persisted ownership
+	sessionPanes := make(map[string]int)
+	for zmxName, sessName := range s.state.ZmxOwnership {
+		if zmxSet[zmxName] {
+			sessionPanes[sessName]++
+		} else {
+			// zmx session no longer exists - log discrepancy
+			log.Printf("[init] DISCREPANCY: zmx session %q (owned by %q) no longer exists", zmxName, sessName)
+			delete(s.state.ZmxOwnership, zmxName)
+		}
+	}
+
+	// Clean up mappings for windows that may no longer exist
+	// (We can't verify kitty windows at init - no socket yet)
+	// Polling will clean these up later
+
+	// Create session entries from ownership
+	for name, panes := range sessionPanes {
 		s.state.Sessions[name] = &SessionState{
 			Name:     name,
-			Status:   "detached", // running zmx but no kitty windows yet
+			Status:   "detached", // will be updated by first poll
 			Panes:    panes,
 			ZmxAlive: true,
 			LastSeen: time.Now(),
@@ -331,6 +353,8 @@ func (s *Server) initState() {
 
 	s.state.ZmxSessions = zmxSessions
 	s.state.LastPoll = time.Now()
+
+	log.Printf("[init] initialized with %d sessions from persisted state", len(s.state.Sessions))
 }
 
 // countZmxPanes counts zmx sessions with the given prefix
@@ -378,91 +402,59 @@ func layoutToSession(layout *config.Layout, name, cwd string) *model.Session {
 }
 
 func (s *Server) handleSessions(k *kitty.Client, params protocol.SessionsParams) protocol.Response {
-	// Query reality - zmx for running sessions, kitty for attached windows
-	zmxSessions, _ := s.zmx.List()
-
-	// Copy ZmxOwnership to avoid holding lock during iteration
+	// Build session list from daemon's authoritative state
 	s.mu.Lock()
-	zmxOwnership := make(map[string]string)
-	for k, v := range s.state.ZmxOwnership {
-		zmxOwnership[k] = v
+	var sessions []protocol.SessionInfo
+	for name, sess := range s.state.Sessions {
+		info := protocol.SessionInfo{
+			Name:           name,
+			Status:         sess.Status,
+			Panes:          sess.Panes,
+			IsRestorePoint: false,
+		}
+
+		// Get CWD from first window
+		if len(sess.WindowIDs) > 0 {
+			if win := s.findWindowInState(sess.WindowIDs[0]); win != nil {
+				info.CWD = win.CWD
+			}
+		}
+
+		// Format last seen
+		if !sess.LastSeen.IsZero() {
+			info.LastSeen = formatLastSeen(sess.LastSeen)
+		}
+
+		sessions = append(sessions, info)
 	}
 	s.mu.Unlock()
 
-	// Extract unique session names from zmx using ownership map
-	zmxBySession := make(map[string]int) // session name -> pane count
-	for _, z := range zmxSessions {
-		// Use ownership map for renamed sessions
-		name := zmxOwnership[z]
-		if name == "" {
-			// Fallback to prefix for sessions created outside kmux or before daemon started
-			for i, c := range z {
-				if c == '.' {
-					name = z[:i]
-					break
-				}
-			}
-		}
-		if name != "" {
-			zmxBySession[name]++
-		}
-	}
-
-	// Query kitty for attached windows
-	kittyWindowsBySession := make(map[string]int) // session name -> window count
-	if k != nil {
-		if state, err := k.GetState(); err == nil && len(state) > 0 {
-			// Copy WindowSessions to avoid holding lock during iteration
-			s.mu.Lock()
-			windowSessions := make(map[int]string)
-			for k, v := range s.state.WindowSessions {
-				windowSessions[k] = v
-			}
-			s.mu.Unlock()
-
-			for _, osWin := range state {
-				for _, tab := range osWin.Tabs {
-					for _, win := range tab.Windows {
-						if sessName := windowSessions[win.ID]; sessName != "" {
-							kittyWindowsBySession[sessName]++
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Build session list from reality
-	var sessions []protocol.SessionInfo
-	for name, zmxCount := range zmxBySession {
-		kittyCount := kittyWindowsBySession[name]
-		status := "detached"
-		panes := zmxCount
-		if kittyCount > 0 {
-			status = "attached"
-			panes = kittyCount // prefer kitty count when attached
-		}
-		sessions = append(sessions, protocol.SessionInfo{
-			Name:           name,
-			Status:         status,
-			Panes:          panes,
-			IsRestorePoint: false,
-		})
-	}
-
 	// Add restore points if requested (save files for sessions not currently running)
 	if params.IncludeRestorePoints {
+		// Build set of running session names
+		s.mu.Lock()
+		runningSessions := make(map[string]bool)
+		for name := range s.state.Sessions {
+			runningSessions[name] = true
+		}
+		s.mu.Unlock()
+
 		saved, _ := s.store.ListSessions()
 		for _, name := range saved {
-			if _, running := zmxBySession[name]; running {
+			if runningSessions[name] {
 				continue // already listed as running
 			}
 
 			panes := 1
+			cwd := ""
 			if sess, err := s.store.LoadSession(name); err == nil {
 				panes = 0
 				for _, tab := range sess.Tabs {
 					panes += len(tab.Windows)
+					// Get CWD from first window of first tab
+					if cwd == "" && len(tab.Windows) > 0 {
+						cwd = tab.Windows[0].CWD
+					}
 				}
 			}
 
@@ -471,11 +463,41 @@ func (s *Server) handleSessions(k *kitty.Client, params protocol.SessionsParams)
 				Status:         "saved",
 				Panes:          panes,
 				IsRestorePoint: true,
+				CWD:            cwd,
 			})
 		}
 	}
 
 	return protocol.SuccessResponse(sessions)
+}
+
+// findWindowInState looks up a window by ID in the cached kitty state.
+func (s *Server) findWindowInState(windowID int) *kitty.Window {
+	for _, osWin := range s.state.KittyState {
+		for _, tab := range osWin.Tabs {
+			for i := range tab.Windows {
+				if tab.Windows[i].ID == windowID {
+					return &tab.Windows[i]
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// formatLastSeen returns a human-readable relative time.
+func formatLastSeen(t time.Time) string {
+	d := time.Since(t)
+	switch {
+	case d < time.Minute:
+		return "just now"
+	case d < time.Hour:
+		return fmt.Sprintf("%dm ago", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh ago", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd ago", int(d.Hours()/24))
+	}
 }
 
 func (s *Server) handleAttach(k *kitty.Client, params protocol.AttachParams) protocol.Response {
@@ -492,33 +514,12 @@ func (s *Server) handleAttach(k *kitty.Client, params protocol.AttachParams) pro
 
 	var session *model.Session
 
-	// Check for running zmx sessions first
-	allZmxSessions, _ := s.zmx.List()
-
-	// Copy ZmxOwnership to check for renamed sessions
+	// Check if session is already running (in daemon's authoritative state)
 	s.mu.Lock()
-	zmxOwnership := make(map[string]string)
-	for k, v := range s.state.ZmxOwnership {
-		zmxOwnership[k] = v
-	}
+	existingSession, sessionRunning := s.state.Sessions[name]
 	s.mu.Unlock()
 
-	var matchingZmxSessions []string
-	for _, z := range allZmxSessions {
-		// Use ownership map for renamed sessions
-		sessionName := zmxOwnership[z]
-		if sessionName == "" {
-			// Fallback to prefix for sessions created outside kmux or before daemon started
-			if idx := strings.Index(z, "."); idx > 0 {
-				sessionName = z[:idx]
-			}
-		}
-		if sessionName == name {
-			matchingZmxSessions = append(matchingZmxSessions, z)
-		}
-	}
-
-	if len(matchingZmxSessions) > 0 {
+	if sessionRunning && existingSession.ZmxAlive {
 		// Session is running - reattach (ignore layout)
 		session, _ = s.store.LoadSession(name)
 		if session == nil {
@@ -597,10 +598,14 @@ func (s *Server) handleAttach(k *kitty.Client, params protocol.AttachParams) pro
 	}
 	s.mu.Unlock()
 
-	// Save session to disk
-	if err := s.store.SaveSession(session); err != nil {
-		return protocol.ErrorResponse(fmt.Sprintf("save session: %v", err))
+	// Persist daemon state (authoritative mappings)
+	if err := s.saveState(); err != nil {
+		log.Printf("[attach] WARNING: failed to persist state: %v", err)
 	}
+
+	// NOTE: We do NOT save the session restore point here.
+	// Saving on attach would overwrite the user's saved layout.
+	// Restore points are created on detach and periodic auto-save only.
 
 	return protocol.SuccessResponse(protocol.AttachResult{
 		Success: true,
@@ -652,7 +657,21 @@ func (s *Server) handleDetach(k *kitty.Client, params protocol.DetachParams) pro
 		sess.WindowIDs = nil
 		sess.LastSeen = time.Now()
 	}
+	// Clear window mappings for closed windows
+	for _, tab := range state[0].Tabs {
+		for _, win := range tab.Windows {
+			if s.state.WindowSessions[win.ID] == name {
+				delete(s.state.Mappings, win.ID)
+				delete(s.state.WindowSessions, win.ID)
+			}
+		}
+	}
 	s.mu.Unlock()
+
+	// Persist daemon state
+	if err := s.saveState(); err != nil {
+		log.Printf("[detach] WARNING: failed to persist state: %v", err)
+	}
 
 	return protocol.SuccessResponse(protocol.AttachResult{
 		Success: true,
@@ -667,34 +686,25 @@ func (s *Server) handleKill(k *kitty.Client, params protocol.KillParams) protoco
 		return protocol.ErrorResponse(err.Error())
 	}
 
-	// Kill all zmx sessions that belong to this session
-	// Use ZmxOwnership for renamed sessions, fallback to prefix matching
+	// Kill all zmx sessions that belong to this session (from authoritative ownership map)
 	s.mu.Lock()
-	zmxOwnership := make(map[string]string)
-	for k, v := range s.state.ZmxOwnership {
-		zmxOwnership[k] = v
+	var zmxToKill []string
+	for zmxName, sessName := range s.state.ZmxOwnership {
+		if sessName == name {
+			zmxToKill = append(zmxToKill, zmxName)
+		}
 	}
 	s.mu.Unlock()
 
-	running, _ := s.zmx.List()
-	for _, r := range running {
-		// Check ownership first (for renamed sessions)
-		if zmxOwnership[r] == name {
-			s.zmx.Kill(r)
-			continue
-		}
-		// Fallback to prefix matching for sessions created outside kmux
-		if len(r) > len(name) && r[:len(name)+1] == name+"." {
-			s.zmx.Kill(r)
-		}
+	for _, zmxName := range zmxToKill {
+		log.Printf("[kill] killing zmx session %s", zmxName)
+		s.zmx.Kill(zmxName)
 	}
 
 	// Clean up ZmxOwnership entries for killed zmx sessions
 	s.mu.Lock()
-	for zmxName, sessName := range s.state.ZmxOwnership {
-		if sessName == name {
-			delete(s.state.ZmxOwnership, zmxName)
-		}
+	for _, zmxName := range zmxToKill {
+		delete(s.state.ZmxOwnership, zmxName)
 	}
 	s.mu.Unlock()
 
@@ -716,7 +726,19 @@ func (s *Server) handleKill(k *kitty.Client, params protocol.KillParams) protoco
 	// Remove from internal state
 	s.mu.Lock()
 	delete(s.state.Sessions, name)
+	// Clean up window mappings for this session
+	for windowID, sessName := range s.state.WindowSessions {
+		if sessName == name {
+			delete(s.state.Mappings, windowID)
+			delete(s.state.WindowSessions, windowID)
+		}
+	}
 	s.mu.Unlock()
+
+	// Persist daemon state
+	if err := s.saveState(); err != nil {
+		log.Printf("[kill] WARNING: failed to persist state: %v", err)
+	}
 
 	return protocol.SuccessResponse(protocol.AttachResult{
 		Success: true,
@@ -841,6 +863,11 @@ func (s *Server) handleSplit(k *kitty.Client, params protocol.SplitParams) proto
 	}
 	s.mu.Unlock()
 
+	// Persist daemon state
+	if err := s.saveState(); err != nil {
+		log.Printf("[split] WARNING: failed to persist state: %v", err)
+	}
+
 	return protocol.SuccessResponse(protocol.SplitResult{
 		Success:  true,
 		WindowID: windowID,
@@ -911,6 +938,11 @@ func (s *Server) handleRename(params protocol.RenameParams) protocol.Response {
 		// Non-fatal - session might not have a save file yet
 	}
 
+	// Persist daemon state
+	if err := s.saveState(); err != nil {
+		log.Printf("[rename] WARNING: failed to persist state: %v", err)
+	}
+
 	return protocol.SuccessResponse(protocol.RenameResult{
 		Success: true,
 		Message: fmt.Sprintf("Renamed session: %s -> %s", oldName, newName),
@@ -922,7 +954,6 @@ func (s *Server) handleWindowClosed(params protocol.WindowClosedParams) protocol
 		params.WindowID, params.ZmxName, params.Session)
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	// Remove from mappings
 	delete(s.state.Mappings, params.WindowID)
@@ -939,15 +970,20 @@ func (s *Server) handleWindowClosed(params protocol.WindowClosedParams) protocol
 		}
 
 		if windowCount == 0 {
-			// Check if zmx sessions are still running
-			zmxSessions, _ := s.zmx.List()
+			// Check if zmx sessions are still running using ownership map
 			zmxAlive := false
 			panes := 0
-			prefix := params.Session + "."
-			for _, z := range zmxSessions {
-				if len(z) > len(prefix) && z[:len(prefix)] == prefix {
-					zmxAlive = true
-					panes++
+			for zmxName, sessName := range s.state.ZmxOwnership {
+				if sessName == params.Session {
+					// Verify zmx is actually running
+					zmxSessions, _ := s.zmx.List()
+					for _, z := range zmxSessions {
+						if z == zmxName {
+							zmxAlive = true
+							panes++
+							break
+						}
+					}
 				}
 			}
 
@@ -964,8 +1000,198 @@ func (s *Server) handleWindowClosed(params protocol.WindowClosedParams) protocol
 			sess.Panes = windowCount
 		}
 	}
+	s.mu.Unlock()
+
+	// Persist daemon state
+	if err := s.saveState(); err != nil {
+		log.Printf("[window-closed] WARNING: failed to persist state: %v", err)
+	}
 
 	return protocol.SuccessResponse(map[string]bool{"ok": true})
+}
+
+func (s *Server) handleCloseFocused(k *kitty.Client) protocol.Response {
+	if k == nil {
+		return protocol.ErrorResponse("no kitty connection available")
+	}
+
+	// Get current kitty state
+	state, err := k.GetState()
+	if err != nil {
+		return protocol.ErrorResponse(fmt.Sprintf("get kitty state: %v", err))
+	}
+
+	// Find the focused window
+	var focusedWindow *kitty.Window
+	for _, osWin := range state {
+		if !osWin.IsActive {
+			continue
+		}
+		for _, tab := range osWin.Tabs {
+			if !tab.IsActive {
+				continue
+			}
+			for i := range tab.Windows {
+				if tab.Windows[i].IsActive {
+					focusedWindow = &tab.Windows[i]
+					break
+				}
+			}
+		}
+	}
+
+	if focusedWindow == nil {
+		return protocol.ErrorResponse("no focused window found")
+	}
+
+	windowID := focusedWindow.ID
+	log.Printf("[close] closing focused window %d", windowID)
+
+	// Check if this is a kmux window
+	s.mu.Lock()
+	zmxName := s.state.Mappings[windowID]
+	session := s.state.WindowSessions[windowID]
+	s.mu.Unlock()
+
+	// If kmux window, kill zmx session
+	if zmxName != "" {
+		log.Printf("[close] killing zmx session %s", zmxName)
+		s.zmx.Kill(zmxName)
+	}
+
+	// Close the kitty window
+	if err := k.CloseWindow(windowID); err != nil {
+		log.Printf("[close] error closing window: %v", err)
+	}
+
+	// Update mappings
+	s.mu.Lock()
+	delete(s.state.Mappings, windowID)
+	delete(s.state.WindowSessions, windowID)
+	if zmxName != "" {
+		delete(s.state.ZmxOwnership, zmxName)
+	}
+
+	// Update session pane count
+	if session != "" {
+		if sess, exists := s.state.Sessions[session]; exists {
+			windowCount := 0
+			for _, sessName := range s.state.WindowSessions {
+				if sessName == session {
+					windowCount++
+				}
+			}
+			sess.Panes = windowCount
+			if windowCount == 0 {
+				sess.Status = "detached"
+			}
+		}
+	}
+	s.mu.Unlock()
+
+	// Persist daemon state
+	if err := s.saveState(); err != nil {
+		log.Printf("[close] WARNING: failed to persist state: %v", err)
+	}
+
+	return protocol.SuccessResponse(protocol.CloseResult{
+		Success:  true,
+		WindowID: windowID,
+		Session:  session,
+		Message:  "Window closed",
+	})
+}
+
+func (s *Server) handleCloseTab(k *kitty.Client) protocol.Response {
+	if k == nil {
+		return protocol.ErrorResponse("no kitty connection available")
+	}
+
+	// Get current kitty state
+	state, err := k.GetState()
+	if err != nil {
+		return protocol.ErrorResponse(fmt.Sprintf("get kitty state: %v", err))
+	}
+
+	// Find the focused tab and all its windows
+	var focusedTab *kitty.Tab
+	for _, osWin := range state {
+		if !osWin.IsActive {
+			continue
+		}
+		for i := range osWin.Tabs {
+			if osWin.Tabs[i].IsActive {
+				focusedTab = &osWin.Tabs[i]
+				break
+			}
+		}
+	}
+
+	if focusedTab == nil {
+		return protocol.ErrorResponse("no focused tab found")
+	}
+
+	log.Printf("[close-tab] closing tab %d with %d windows", focusedTab.ID, len(focusedTab.Windows))
+
+	// Kill zmx sessions for all windows in this tab
+	s.mu.Lock()
+	var sessionsAffected = make(map[string]bool)
+	for _, win := range focusedTab.Windows {
+		if zmxName := s.state.Mappings[win.ID]; zmxName != "" {
+			log.Printf("[close-tab] killing zmx session %s", zmxName)
+			s.zmx.Kill(zmxName)
+			delete(s.state.ZmxOwnership, zmxName)
+		}
+		if session := s.state.WindowSessions[win.ID]; session != "" {
+			sessionsAffected[session] = true
+		}
+		delete(s.state.Mappings, win.ID)
+		delete(s.state.WindowSessions, win.ID)
+	}
+	s.mu.Unlock()
+
+	// Close the tab (using first window ID as match)
+	if len(focusedTab.Windows) > 0 {
+		if err := k.CloseTab(focusedTab.Windows[0].ID); err != nil {
+			log.Printf("[close-tab] error closing tab: %v", err)
+		}
+	}
+
+	// Update session states
+	s.mu.Lock()
+	for session := range sessionsAffected {
+		if sess, exists := s.state.Sessions[session]; exists {
+			windowCount := 0
+			for _, sessName := range s.state.WindowSessions {
+				if sessName == session {
+					windowCount++
+				}
+			}
+			sess.Panes = windowCount
+			if windowCount == 0 {
+				sess.Status = "detached"
+			}
+		}
+	}
+	s.mu.Unlock()
+
+	// Persist daemon state
+	if err := s.saveState(); err != nil {
+		log.Printf("[close-tab] WARNING: failed to persist state: %v", err)
+	}
+
+	var sessionName string
+	for s := range sessionsAffected {
+		sessionName = s
+		break
+	}
+
+	return protocol.SuccessResponse(protocol.CloseResult{
+		Success:  true,
+		WindowID: focusedTab.ID,
+		Session:  sessionName,
+		Message:  "Tab closed",
+	})
 }
 
 func (s *Server) runPollingLoop() {
@@ -988,43 +1214,18 @@ func (s *Server) runPollingLoop() {
 }
 
 func (s *Server) pollState() {
-	// Poll zmx
+	// Poll zmx for verification
 	zmxSessions, _ := s.zmx.List()
-	log.Printf("[poll] zmx sessions: %v", zmxSessions)
-
-	// Copy ZmxOwnership before using it
-	s.mu.Lock()
-	zmxOwnership := make(map[string]string)
-	for k, v := range s.state.ZmxOwnership {
-		zmxOwnership[k] = v
-	}
-	s.mu.Unlock()
-
-	// Extract session names from zmx using ownership map
-	zmxBySession := make(map[string]bool)
+	zmxSet := make(map[string]bool)
 	for _, z := range zmxSessions {
-		// Use ownership map for renamed sessions
-		name := zmxOwnership[z]
-		if name == "" {
-			// Fallback to prefix for sessions created outside kmux
-			for i, c := range z {
-				if c == '.' {
-					name = z[:i]
-					break
-				}
-			}
-		}
-		if name != "" {
-			zmxBySession[name] = true
-		}
+		zmxSet[z] = true
 	}
-	log.Printf("[poll] zmxBySession: %v", zmxBySession)
 
 	// Poll kitty - discover/verify socket each poll cycle
 	kittyClient := s.ensureKittyClient()
 
 	var kittyState kitty.KittyState
-	kittyWindowsBySession := make(map[string][]int) // session name -> window IDs
+	currentWindowIDs := make(map[int]bool)
 
 	if kittyClient != nil {
 		var err error
@@ -1035,134 +1236,117 @@ func (s *Server) pollState() {
 			s.kittySocket = ""
 			s.kitty = nil
 			s.mu.Unlock()
-		} else if len(kittyState) > 0 {
-			// Build kittyWindowsBySession from WindowSessions (not from env vars)
-			s.mu.Lock()
+		} else {
 			for _, osWin := range kittyState {
 				for _, tab := range osWin.Tabs {
 					for _, win := range tab.Windows {
-						if sessName := s.state.WindowSessions[win.ID]; sessName != "" {
-							kittyWindowsBySession[sessName] = append(kittyWindowsBySession[sessName], win.ID)
-						}
+						currentWindowIDs[win.ID] = true
 					}
 				}
 			}
-			s.mu.Unlock()
-			log.Printf("[poll] kittyWindowsBySession: %v", kittyWindowsBySession)
 		}
 	}
 
-	// Update state
+	// Verify and update state
 	s.mu.Lock()
-
-	prevWindowIDs := make(map[string][]int)
-	for name, sess := range s.state.Sessions {
-		prevWindowIDs[name] = sess.WindowIDs
-	}
 
 	s.state.ZmxSessions = zmxSessions
 	s.state.KittyState = kittyState
 	s.state.LastPoll = time.Now()
 
-	// Discover new sessions from zmx
-	for name := range zmxBySession {
-		if _, exists := s.state.Sessions[name]; !exists {
-			// Count panes from zmx processes
-			panes := countZmxPanes(zmxSessions, name)
-			s.state.Sessions[name] = &SessionState{
-				Name:     name,
-				Status:   "detached",
-				Panes:    panes,
-				ZmxAlive: true,
-				LastSeen: time.Now(),
-			}
-			log.Printf("[poll] discovered session %s from zmx (panes=%d)", name, panes)
+	stateChanged := false
+
+	// Check for discrepancies: zmx sessions we own that are gone
+	for zmxName, sessName := range s.state.ZmxOwnership {
+		if !zmxSet[zmxName] {
+			log.Printf("[poll] DISCREPANCY: zmx session %q (owned by %q) no longer exists - removing from ownership",
+				zmxName, sessName)
+			delete(s.state.ZmxOwnership, zmxName)
+			stateChanged = true
 		}
 	}
 
-	// Discover new sessions from kitty
-	for name := range kittyWindowsBySession {
-		if _, exists := s.state.Sessions[name]; !exists {
-			s.state.Sessions[name] = &SessionState{
-				Name:     name,
-				Status:   "attached",
-				Panes:    len(kittyWindowsBySession[name]),
-				ZmxAlive: zmxBySession[name],
-				LastSeen: time.Now(),
-			}
+	// Check for discrepancies: unknown zmx sessions running
+	for _, z := range zmxSessions {
+		if _, owned := s.state.ZmxOwnership[z]; !owned {
+			// This is a zmx session we don't know about - log it but don't adopt
+			log.Printf("[poll] DISCREPANCY: unknown zmx session %q running (not in ownership map)", z)
 		}
 	}
 
-	// Update existing sessions
-	var sessionsToSave []string
+	// Clean up mappings for windows that no longer exist
+	for windowID, zmxName := range s.state.Mappings {
+		if !currentWindowIDs[windowID] {
+			log.Printf("[poll] window %d no longer exists - removing mapping to %q", windowID, zmxName)
+			delete(s.state.Mappings, windowID)
+			stateChanged = true
+		}
+	}
+	for windowID, sessName := range s.state.WindowSessions {
+		if !currentWindowIDs[windowID] {
+			log.Printf("[poll] window %d no longer exists - removing session association %q", windowID, sessName)
+			delete(s.state.WindowSessions, windowID)
+			stateChanged = true
+		}
+	}
+
+	// Build session status from ownership (authoritative) and verify against reality
+	kittyWindowsBySession := make(map[string][]int)
+	for windowID, sessName := range s.state.WindowSessions {
+		if currentWindowIDs[windowID] {
+			kittyWindowsBySession[sessName] = append(kittyWindowsBySession[sessName], windowID)
+		}
+	}
+
+	// Count zmx panes per session from ownership
+	zmxPanesBySession := make(map[string]int)
+	for zmxName, sessName := range s.state.ZmxOwnership {
+		if zmxSet[zmxName] {
+			zmxPanesBySession[sessName]++
+		}
+	}
+
+	// Update session states
 	for name, sess := range s.state.Sessions {
-		sess.ZmxAlive = zmxBySession[name]
 		windowIDs := kittyWindowsBySession[name]
+		zmxPanes := zmxPanesBySession[name]
+
+		oldStatus := sess.Status
+		oldPanes := sess.Panes
+
+		sess.ZmxAlive = zmxPanes > 0
 		sess.WindowIDs = windowIDs
 
-		// Update pane count from windows or zmx
-		oldPanes := sess.Panes
 		if len(windowIDs) > 0 {
-			sess.Panes = len(windowIDs)
-		} else if sess.ZmxAlive {
-			// For detached sessions, count zmx processes
-			sess.Panes = countZmxPanes(s.state.ZmxSessions, name)
-		}
-
-		// Determine status
-		hasWindows := len(windowIDs) > 0
-		prevHadWindows := len(prevWindowIDs[name]) > 0
-		oldStatus := sess.Status
-
-		if hasWindows {
 			sess.Status = "attached"
+			sess.Panes = len(windowIDs)
 			sess.LastSeen = time.Now()
 		} else if sess.ZmxAlive {
-			// Windows disappeared but zmx still running - save immediately
-			if prevHadWindows {
-				sessionsToSave = append(sessionsToSave, name)
-				log.Printf("[poll] session %s: windows closed, will save", name)
-			}
 			sess.Status = "detached"
+			sess.Panes = zmxPanes
 			sess.LastSeen = time.Now()
 		} else {
 			// No windows, no zmx - session is gone
 			log.Printf("[poll] session %s: removed (no windows, no zmx)", name)
 			delete(s.state.Sessions, name)
+			stateChanged = true
+			continue
 		}
 
 		// Log state changes
 		if oldStatus != sess.Status || oldPanes != sess.Panes {
-			log.Printf("[poll] session %s: %s/%d -> %s/%d (zmxAlive=%v, windows=%v)",
-				name, oldStatus, oldPanes, sess.Status, sess.Panes, sess.ZmxAlive, windowIDs)
-		}
-	}
-
-	// Clean up mappings for windows that no longer exist
-	currentWindowIDs := make(map[int]bool)
-	for _, osWin := range kittyState {
-		for _, tab := range osWin.Tabs {
-			for _, win := range tab.Windows {
-				currentWindowIDs[win.ID] = true
-			}
-		}
-	}
-	for windowID := range s.state.Mappings {
-		if !currentWindowIDs[windowID] {
-			delete(s.state.Mappings, windowID)
-		}
-	}
-	for windowID := range s.state.WindowSessions {
-		if !currentWindowIDs[windowID] {
-			delete(s.state.WindowSessions, windowID)
+			log.Printf("[poll] session %s: %s/%d -> %s/%d",
+				name, oldStatus, oldPanes, sess.Status, sess.Panes)
 		}
 	}
 
 	s.mu.Unlock()
 
-	// Save sessions that lost windows (outside lock to avoid deadlock)
-	for _, name := range sessionsToSave {
-		s.saveSession(name)
+	// Persist state if changes were detected
+	if stateChanged {
+		if err := s.saveState(); err != nil {
+			log.Printf("[poll] WARNING: failed to persist state after cleanup: %v", err)
+		}
 	}
 }
 
@@ -1198,20 +1382,3 @@ func (s *Server) autoSaveAll() {
 	}
 }
 
-// saveSession derives and saves a session from current kitty state
-func (s *Server) saveSession(name string) {
-	s.mu.Lock()
-	kittyState := s.state.KittyState
-	mappings := s.state.Mappings
-	windowSessions := s.state.WindowSessions
-	s.mu.Unlock()
-
-	if len(kittyState) == 0 {
-		return
-	}
-
-	session := manager.DeriveSession(name, kittyState, mappings, windowSessions)
-	if len(session.Tabs) > 0 {
-		s.store.SaveSession(session)
-	}
-}

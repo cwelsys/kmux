@@ -14,6 +14,8 @@ const (
 	MethodResolve      = "resolve"
 	MethodRename       = "rename"
 	MethodWindowClosed = "window_closed"
+	MethodCloseFocused = "close_focused"
+	MethodCloseTab     = "close_tab"
 )
 
 // Request is an RPC request.
@@ -32,9 +34,11 @@ type Response struct {
 // SessionInfo is returned by the sessions method.
 type SessionInfo struct {
 	Name           string `json:"name"`
-	Status         string `json:"status"` // "attached", "detached"
+	Status         string `json:"status"` // "attached", "detached", "saved"
 	Panes          int    `json:"panes"`
 	IsRestorePoint bool   `json:"is_restore_point,omitempty"`
+	CWD            string `json:"cwd,omitempty"`            // working directory of first pane
+	LastSeen       string `json:"last_seen,omitempty"`      // human-readable last activity
 }
 
 // SessionsParams for sessions method.
@@ -107,6 +111,14 @@ type WindowClosedParams struct {
 	WindowID int    `json:"window_id"` // kitty window ID
 	ZmxName  string `json:"zmx_name"`  // zmx session name
 	Session  string `json:"session"`   // kmux session name
+}
+
+// CloseResult for close_focused and close_tab methods.
+type CloseResult struct {
+	Success  bool   `json:"success"`
+	WindowID int    `json:"window_id"` // closed window ID
+	Session  string `json:"session"`   // session name if kmux window, empty otherwise
+	Message  string `json:"message"`
 }
 
 // SuccessResponse creates a success response with the given result.

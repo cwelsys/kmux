@@ -11,6 +11,8 @@ type SessionInfo struct {
 	Name       string
 	PaneCount  int
 	HasRunning bool
+	CWD        string
+	LastSeen   string
 }
 
 // Model is the bubbletea model for the TUI.
@@ -65,7 +67,9 @@ func (m Model) loadSessions() tea.Msg {
 		infos = append(infos, SessionInfo{
 			Name:       s.Name,
 			PaneCount:  s.Panes,
-			HasRunning: s.Status == "attached",
+			HasRunning: s.Status == "attached" || s.Status == "detached",
+			CWD:        s.CWD,
+			LastSeen:   s.LastSeen,
 		})
 	}
 
@@ -217,10 +221,34 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleConfirmKill(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "y", "Y":
-		m.action = "kill"
-		m.quitting = true
-		return m, tea.Quit
+	case "y", "Y", "enter":
+		session := m.SelectedSession()
+		if session == "" {
+			m.confirmKill = false
+			return m, nil
+		}
+
+		// Optimistic update - remove from list immediately for snappy UI
+		newSessions := make([]SessionInfo, 0, len(m.sessions)-1)
+		for _, s := range m.sessions {
+			if s.Name != session {
+				newSessions = append(newSessions, s)
+			}
+		}
+		m.sessions = newSessions
+
+		// Adjust cursor
+		if m.cursor >= len(m.sessions) && m.cursor > 0 {
+			m.cursor--
+		}
+
+		m.confirmKill = false
+
+		// Kill in background, reload to sync state
+		return m, func() tea.Msg {
+			m.client.Kill(session)
+			return nil // Silently sync - UI already updated
+		}
 	case "n", "N", "esc":
 		m.confirmKill = false
 	}

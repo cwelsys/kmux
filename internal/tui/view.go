@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -103,14 +104,27 @@ func (m Model) viewPreview(width, height int) string {
 	} else {
 		s := m.sessions[m.cursor]
 
-		b.WriteString(previewTitleStyle.Render(s.Name) + "\n")
+		b.WriteString(previewTitleStyle.Render(s.Name) + "\n\n")
 
 		status := "saved"
 		if s.HasRunning {
 			status = "running"
 		}
 		b.WriteString(previewInfoStyle.Render(fmt.Sprintf("status: %s", status)) + "\n")
-		b.WriteString(previewInfoStyle.Render(fmt.Sprintf("panes: %d", s.PaneCount)) + "\n")
+		b.WriteString(previewInfoStyle.Render(fmt.Sprintf("panes:  %d", s.PaneCount)) + "\n")
+
+		if s.CWD != "" {
+			// Shorten home directory
+			cwd := s.CWD
+			if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(cwd, home) {
+				cwd = "~" + cwd[len(home):]
+			}
+			b.WriteString(previewInfoStyle.Render(fmt.Sprintf("cwd:    %s", cwd)) + "\n")
+		}
+
+		if s.LastSeen != "" && s.HasRunning {
+			b.WriteString(previewInfoStyle.Render(fmt.Sprintf("active: %s", s.LastSeen)) + "\n")
+		}
 	}
 
 	style := borderStyle.Width(width).Height(height)
