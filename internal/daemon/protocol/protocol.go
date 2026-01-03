@@ -11,6 +11,8 @@ const (
 	MethodKill     = "kill"
 	MethodShutdown = "shutdown"
 	MethodSplit    = "split"
+	MethodResolve  = "resolve"
+	MethodRename   = "rename"
 )
 
 // Request is an RPC request.
@@ -73,6 +75,28 @@ type SplitResult struct {
 	Success  bool   `json:"success"`
 	WindowID int    `json:"window_id"`
 	Message  string `json:"message"`
+}
+
+// ResolveParams for resolve method.
+type ResolveParams struct {
+	WindowID int `json:"window_id"` // KITTY_WINDOW_ID
+}
+
+// ResolveResult from resolve method.
+type ResolveResult struct {
+	Session string `json:"session"` // session name, empty if not found
+}
+
+// RenameParams for rename method.
+type RenameParams struct {
+	OldName string `json:"old_name"`
+	NewName string `json:"new_name"`
+}
+
+// RenameResult from rename method.
+type RenameResult struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
 }
 
 // SuccessResponse creates a success response with the given result.
