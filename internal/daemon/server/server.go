@@ -817,6 +817,21 @@ func (s *Server) pollState() {
 		}
 	}
 
+	// Clean up mappings for windows that no longer exist
+	currentWindowIDs := make(map[int]bool)
+	for _, osWin := range kittyState {
+		for _, tab := range osWin.Tabs {
+			for _, win := range tab.Windows {
+				currentWindowIDs[win.ID] = true
+			}
+		}
+	}
+	for windowID := range s.state.Mappings {
+		if !currentWindowIDs[windowID] {
+			delete(s.state.Mappings, windowID)
+		}
+	}
+
 	s.mu.Unlock()
 
 	// Save sessions that lost windows (outside lock to avoid deadlock)
