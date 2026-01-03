@@ -27,6 +27,7 @@ type Window struct {
 	CWD       string `json:"cwd"`
 	Command   string `json:"command,omitempty"`
 	Ephemeral bool   `json:"ephemeral,omitempty"`
+	ZmxName   string `json:"zmx_name,omitempty"` // Actual zmx session name
 }
 
 // SplitNode represents a node in the split tree.
