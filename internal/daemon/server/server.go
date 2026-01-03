@@ -706,8 +706,54 @@ func (s *Server) handleResolve(params protocol.ResolveParams) protocol.Response 
 }
 
 func (s *Server) handleRename(params protocol.RenameParams) protocol.Response {
-	// TODO: Implement in Task 7
-	return protocol.ErrorResponse("rename not yet implemented")
+	oldName := params.OldName
+	newName := params.NewName
+
+	// Validate names
+	if err := store.ValidateSessionName(oldName); err != nil {
+		return protocol.ErrorResponse(fmt.Sprintf("invalid old name: %v", err))
+	}
+	if err := store.ValidateSessionName(newName); err != nil {
+		return protocol.ErrorResponse(fmt.Sprintf("invalid new name: %v", err))
+	}
+
+	// Check old exists
+	s.mu.Lock()
+	oldSession, exists := s.state.Sessions[oldName]
+	if !exists {
+		s.mu.Unlock()
+		return protocol.ErrorResponse(fmt.Sprintf("session not found: %s", oldName))
+	}
+
+	// Check new doesn't exist
+	if _, exists := s.state.Sessions[newName]; exists {
+		s.mu.Unlock()
+		return protocol.ErrorResponse(fmt.Sprintf("session already exists: %s", newName))
+	}
+
+	// Update in-memory state
+	oldSession.Name = newName
+	s.state.Sessions[newName] = oldSession
+	delete(s.state.Sessions, oldName)
+
+	// Update WindowSessions mappings
+	for windowID, sessName := range s.state.WindowSessions {
+		if sessName == oldName {
+			s.state.WindowSessions[windowID] = newName
+		}
+	}
+	s.mu.Unlock()
+
+	// Rename save file
+	// TODO: Uncomment in Task 8 when RenameSession is implemented
+	// if err := s.store.RenameSession(oldName, newName); err != nil {
+	// 	// Non-fatal - session might not have a save file yet
+	// }
+
+	return protocol.SuccessResponse(protocol.RenameResult{
+		Success: true,
+		Message: fmt.Sprintf("Renamed session: %s -> %s", oldName, newName),
+	})
 }
 
 func (s *Server) runPollingLoop() {
