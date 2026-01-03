@@ -35,11 +35,11 @@ func TestSocketPath_Override(t *testing.T) {
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.WatchInterval != 5 {
-		t.Errorf("WatchInterval = %d, want 5", cfg.WatchInterval)
+	if cfg.Daemon.WatchInterval != 5 {
+		t.Errorf("WatchInterval = %d, want 5", cfg.Daemon.WatchInterval)
 	}
-	if cfg.AutoSaveInterval != 900 {
-		t.Errorf("AutoSaveInterval = %d, want 900", cfg.AutoSaveInterval)
+	if cfg.Daemon.AutoSaveInterval != 900 {
+		t.Errorf("AutoSaveInterval = %d, want 900", cfg.Daemon.AutoSaveInterval)
 	}
 }
 
@@ -76,5 +76,90 @@ func TestConfigDirWithXDG(t *testing.T) {
 	dir := ConfigDir()
 	if dir != "/xdg/config/kmux" {
 		t.Errorf("ConfigDir() = %q, want %q", dir, "/xdg/config/kmux")
+	}
+}
+
+func TestLoadConfig(t *testing.T) {
+	// Create temp config file
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	content := `
+[daemon]
+watch_interval = 10
+auto_save_interval = 600
+
+[kitty]
+socket = "/tmp/custom-kitty"
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	os.Setenv("KMUX_CONFIG_DIR", dir)
+	defer os.Unsetenv("KMUX_CONFIG_DIR")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	if cfg.Daemon.WatchInterval != 10 {
+		t.Errorf("WatchInterval = %d, want 10", cfg.Daemon.WatchInterval)
+	}
+	if cfg.Daemon.AutoSaveInterval != 600 {
+		t.Errorf("AutoSaveInterval = %d, want 600", cfg.Daemon.AutoSaveInterval)
+	}
+	if cfg.Kitty.Socket != "/tmp/custom-kitty" {
+		t.Errorf("Kitty.Socket = %q, want %q", cfg.Kitty.Socket, "/tmp/custom-kitty")
+	}
+}
+
+func TestLoadConfigDefaults(t *testing.T) {
+	// Empty dir - no config file
+	dir := t.TempDir()
+	os.Setenv("KMUX_CONFIG_DIR", dir)
+	defer os.Unsetenv("KMUX_CONFIG_DIR")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	// Should use defaults
+	if cfg.Daemon.WatchInterval != 5 {
+		t.Errorf("WatchInterval = %d, want 5", cfg.Daemon.WatchInterval)
+	}
+	if cfg.Daemon.AutoSaveInterval != 900 {
+		t.Errorf("AutoSaveInterval = %d, want 900", cfg.Daemon.AutoSaveInterval)
+	}
+}
+
+func TestLoadConfigPartial(t *testing.T) {
+	// Config with only daemon section, kitty section omitted
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, "config.toml")
+	content := `
+[daemon]
+watch_interval = 10
+`
+	os.WriteFile(configPath, []byte(content), 0644)
+
+	os.Setenv("KMUX_CONFIG_DIR", dir)
+	defer os.Unsetenv("KMUX_CONFIG_DIR")
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
+	}
+
+	// Should use custom daemon value
+	if cfg.Daemon.WatchInterval != 10 {
+		t.Errorf("WatchInterval = %d, want 10", cfg.Daemon.WatchInterval)
+	}
+	// Should preserve default for auto_save_interval (not specified)
+	if cfg.Daemon.AutoSaveInterval != 900 {
+		t.Errorf("AutoSaveInterval = %d, want 900 (default)", cfg.Daemon.AutoSaveInterval)
+	}
+	// Kitty.Socket should remain empty (default)
+	if cfg.Kitty.Socket != "" {
+		t.Errorf("Kitty.Socket = %q, want empty (default)", cfg.Kitty.Socket)
 	}
 }

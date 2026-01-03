@@ -4,20 +4,55 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
-// Config holds daemon configuration.
-type Config struct {
-	WatchInterval    int `json:"watch_interval"`     // seconds
-	AutoSaveInterval int `json:"auto_save_interval"` // seconds
+// DaemonConfig holds daemon-specific settings.
+type DaemonConfig struct {
+	WatchInterval    int `toml:"watch_interval"`
+	AutoSaveInterval int `toml:"auto_save_interval"`
 }
 
-// DefaultConfig returns sensible defaults.
+// KittyConfig holds kitty-specific settings.
+type KittyConfig struct {
+	Socket string `toml:"socket"`
+}
+
+// Config holds all kmux configuration.
+type Config struct {
+	Daemon DaemonConfig `toml:"daemon"`
+	Kitty  KittyConfig  `toml:"kitty"`
+}
+
+// DefaultConfig returns configuration with sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
-		WatchInterval:    5,
-		AutoSaveInterval: 900, // 15 minutes
+		Daemon: DaemonConfig{
+			WatchInterval:    5,
+			AutoSaveInterval: 900,
+		},
 	}
+}
+
+// LoadConfig loads configuration from the config file, using defaults for missing values.
+func LoadConfig() (*Config, error) {
+	cfg := DefaultConfig()
+
+	configPath := filepath.Join(ConfigDir(), "config.toml")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return cfg, nil // No config file, use defaults
+		}
+		return nil, fmt.Errorf("read config: %w", err)
+	}
+
+	if err := toml.Unmarshal(data, cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
+	}
+
+	return cfg, nil
 }
 
 // SocketPath returns the daemon socket path.

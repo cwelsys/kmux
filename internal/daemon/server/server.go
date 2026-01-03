@@ -57,6 +57,12 @@ type Server struct {
 
 // New creates a new daemon server.
 func New(socketPath, dataDir string) *Server {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		// Fall back to defaults on error
+		cfg = config.DefaultConfig()
+	}
+
 	return &Server{
 		socketPath: socketPath,
 		dataDir:    dataDir,
@@ -64,7 +70,7 @@ func New(socketPath, dataDir string) *Server {
 		store:      store.New(dataDir),
 		kitty:      kitty.NewClient(),
 		zmx:        zmx.NewClient(),
-		cfg:        config.DefaultConfig(),
+		cfg:        cfg,
 		state: &DaemonState{
 			Sessions:       make(map[string]*SessionState),
 			Mappings:       make(map[int]string),
@@ -812,8 +818,8 @@ func (s *Server) handleRename(params protocol.RenameParams) protocol.Response {
 }
 
 func (s *Server) runPollingLoop() {
-	pollTicker := time.NewTicker(time.Duration(s.cfg.WatchInterval) * time.Second)
-	saveTicker := time.NewTicker(time.Duration(s.cfg.AutoSaveInterval) * time.Second)
+	pollTicker := time.NewTicker(time.Duration(s.cfg.Daemon.WatchInterval) * time.Second)
+	saveTicker := time.NewTicker(time.Duration(s.cfg.Daemon.AutoSaveInterval) * time.Second)
 	defer pollTicker.Stop()
 	defer saveTicker.Stop()
 
