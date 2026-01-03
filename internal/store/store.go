@@ -142,3 +142,33 @@ func (s *Store) DeleteSession(name string) error {
 	}
 	return nil
 }
+
+// RenameSession renames a session's save file and updates its name.
+func (s *Store) RenameSession(oldName, newName string) error {
+	oldPath := s.sessionPath(oldName)
+	newPath := s.sessionPath(newName)
+
+	// Check old exists
+	if _, err := os.Stat(oldPath); os.IsNotExist(err) {
+		return fmt.Errorf("session not found: %s", oldName)
+	}
+
+	// Check new doesn't exist
+	if _, err := os.Stat(newPath); err == nil {
+		return fmt.Errorf("session already exists: %s", newName)
+	}
+
+	// Load, update name, save to new location
+	sess, err := s.LoadSession(oldName)
+	if err != nil {
+		return err
+	}
+	sess.Name = newName
+
+	if err := s.SaveSession(sess); err != nil {
+		return err
+	}
+
+	// Remove old file
+	return os.Remove(oldPath)
+}

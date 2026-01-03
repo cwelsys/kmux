@@ -83,3 +83,33 @@ func TestListSessions(t *testing.T) {
 		t.Errorf("expected 3 sessions, got %d", len(names))
 	}
 }
+
+func TestRenameSession(t *testing.T) {
+	dir := t.TempDir()
+	s := New(dir)
+
+	// Create a session
+	sess := &model.Session{Name: "old", Host: "local"}
+	if err := s.SaveSession(sess); err != nil {
+		t.Fatal(err)
+	}
+
+	// Rename it
+	if err := s.RenameSession("old", "new"); err != nil {
+		t.Fatal(err)
+	}
+
+	// Old should not exist
+	if _, err := s.LoadSession("old"); err == nil {
+		t.Error("expected old session to not exist")
+	}
+
+	// New should exist
+	loaded, err := s.LoadSession("new")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Name != "new" {
+		t.Errorf("expected name 'new', got %q", loaded.Name)
+	}
+}
