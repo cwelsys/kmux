@@ -66,9 +66,13 @@ func DeriveSession(name string, state kitty.KittyState) *model.Session {
 
 		// Parse split tree if this is a splits layout with multiple windows
 		if tab.Layout == "splits" && len(sessionWindows) > 1 && tab.LayoutState.Pairs != nil {
-			splitRoot, err := kitty.PairToSplitNode(tab.LayoutState.Pairs, windowIDToIdx)
-			if err == nil {
-				modelTab.SplitRoot = splitRoot
+			// Build group→window mapping from AllWindows
+			groupToWindowID := tab.LayoutState.AllWindows.GroupToWindowID()
+			if groupToWindowID != nil {
+				splitRoot, err := kitty.PairToSplitNode(tab.LayoutState.Pairs, groupToWindowID, windowIDToIdx)
+				if err == nil {
+					modelTab.SplitRoot = splitRoot
+				}
 			}
 		}
 

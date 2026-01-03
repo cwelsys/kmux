@@ -61,8 +61,9 @@ func TestDeriveSession(t *testing.T) {
 }
 
 func TestDeriveSession_WithSplits(t *testing.T) {
-	// Build kitty state with splits layout
-	id42, id43 := 42, 43
+	// Build kitty state with splits layout using real structure
+	// Groups 31 and 32 contain windows 42 and 43
+	group31, group32 := 31, 32
 	state := kitty.KittyState{
 		{
 			ID: 1,
@@ -72,11 +73,17 @@ func TestDeriveSession_WithSplits(t *testing.T) {
 					Title:  "dev",
 					Layout: "splits",
 					LayoutState: kitty.LayoutState{
+						AllWindows: &kitty.AllWindows{
+							WindowGroups: []kitty.WindowGroup{
+								{ID: 31, WindowIDs: []int{42}},
+								{ID: 32, WindowIDs: []int{43}},
+							},
+						},
 						Pairs: &kitty.Pair{
 							Horizontal: true,
 							Bias:       0.7,
-							One:        &kitty.Pair{WindowID: &id42},
-							Two:        &kitty.Pair{WindowID: &id43},
+							One:        &kitty.Pair{GroupID: &group31},
+							Two:        &kitty.Pair{GroupID: &group32},
 						},
 					},
 					Windows: []kitty.Window{

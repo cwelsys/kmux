@@ -57,6 +57,7 @@ func TestParseState(t *testing.T) {
 }
 
 func TestParseState_WithSplits(t *testing.T) {
+	// Real kitty structure: pairs contain GROUP IDs that reference all_windows.window_groups
 	jsonData := `[{
 		"id": 1,
 		"tabs": [{
@@ -64,17 +65,22 @@ func TestParseState_WithSplits(t *testing.T) {
 			"title": "test",
 			"layout": "splits",
 			"layout_state": {
+				"all_windows": {
+					"window_groups": [
+						{"id": 31, "window_ids": [33]},
+						{"id": 41, "window_ids": [45]},
+						{"id": 42, "window_ids": [46]}
+					]
+				},
 				"pairs": {
-					"horizontal": true,
-					"bias": 0.7,
-					"one": 42,
-					"two": {"one": 43, "two": 44}
+					"one": 31,
+					"two": {"horizontal": false, "one": 41, "two": 42}
 				}
 			},
 			"windows": [
-				{"id": 42, "cwd": "/", "env": {}},
-				{"id": 43, "cwd": "/", "env": {}},
-				{"id": 44, "cwd": "/", "env": {}}
+				{"id": 33, "cwd": "/", "env": {}},
+				{"id": 45, "cwd": "/", "env": {}},
+				{"id": 46, "cwd": "/", "env": {}}
 			]
 		}]
 	}]`
@@ -84,34 +90,45 @@ func TestParseState_WithSplits(t *testing.T) {
 		t.Fatalf("parse error: %v", err)
 	}
 
-	pairs := state[0].Tabs[0].LayoutState.Pairs
+	tab := state[0].Tabs[0]
+
+	// Verify all_windows is parsed
+	if tab.LayoutState.AllWindows == nil {
+		t.Fatal("all_windows should not be nil")
+	}
+	if len(tab.LayoutState.AllWindows.WindowGroups) != 3 {
+		t.Errorf("expected 3 window groups, got %d", len(tab.LayoutState.AllWindows.WindowGroups))
+	}
+
+	// Verify GroupToWindowID mapping
+	groupToWindow := tab.LayoutState.AllWindows.GroupToWindowID()
+	if groupToWindow[31] != 33 {
+		t.Errorf("group 31 should map to window 33, got %d", groupToWindow[31])
+	}
+	if groupToWindow[41] != 45 {
+		t.Errorf("group 41 should map to window 45, got %d", groupToWindow[41])
+	}
+
+	pairs := tab.LayoutState.Pairs
 	if pairs == nil {
 		t.Fatal("pairs should not be nil")
 	}
 
-	// Verify root is horizontal with bias
-	if !pairs.Horizontal {
-		t.Error("root should be horizontal")
-	}
-	if pairs.Bias != 0.7 {
-		t.Errorf("bias = %v, want 0.7", pairs.Bias)
+	// Verify root structure
+	if pairs.Horizontal != true {
+		t.Error("root should be horizontal (default)")
 	}
 
-	// Verify first child is window 42
-	if pairs.One == nil || pairs.One.WindowID == nil || *pairs.One.WindowID != 42 {
-		t.Error("first child should be window 42")
+	// Verify first child is group 31
+	if pairs.One == nil || pairs.One.GroupID == nil || *pairs.One.GroupID != 31 {
+		t.Error("first child should be group 31")
 	}
 
-	// Verify second child is nested pair
-	if pairs.Two == nil || pairs.Two.WindowID != nil {
+	// Verify second child is nested pair (hsplit)
+	if pairs.Two == nil || pairs.Two.GroupID != nil {
 		t.Error("second child should be nested pair")
 	}
-
-	// Verify nested pair defaults (horizontal defaults to true when omitted in kitty)
-	if pairs.Two.Horizontal != true {
-		t.Errorf("nested horizontal = %v, want true (default)", pairs.Two.Horizontal)
-	}
-	if pairs.Two.Bias != 0.5 {
-		t.Errorf("nested bias = %v, want 0.5 (default)", pairs.Two.Bias)
+	if pairs.Two.Horizontal != false {
+		t.Error("nested split should be horizontal=false (hsplit)")
 	}
 }

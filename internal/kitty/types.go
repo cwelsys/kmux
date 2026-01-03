@@ -24,14 +24,46 @@ type Tab struct {
 
 // LayoutState contains split information.
 type LayoutState struct {
-	Pairs *Pair `json:"pairs,omitempty"`
+	AllWindows *AllWindows `json:"all_windows,omitempty"`
+	Pairs      *Pair       `json:"pairs,omitempty"`
+}
+
+// AllWindows contains window group mappings.
+type AllWindows struct {
+	WindowGroups []WindowGroup `json:"window_groups"`
+}
+
+// WindowGroup maps a group ID to window IDs.
+// In kitty's layout_state.pairs, leaf nodes are group IDs, not window IDs.
+type WindowGroup struct {
+	ID        int   `json:"id"`
+	WindowIDs []int `json:"window_ids"`
+}
+
+// GroupToWindowID builds a map from group ID to first window ID.
+// Used to dereference pairs which contain group IDs.
+func (a *AllWindows) GroupToWindowID() map[int]int {
+	if a == nil {
+		return nil
+	}
+	m := make(map[int]int)
+	for _, g := range a.WindowGroups {
+		if len(g.WindowIDs) > 0 {
+			m[g.ID] = g.WindowIDs[0]
+		}
+	}
+	return m
 }
 
 // Pair represents a split node in kitty's layout tree.
-// Either WindowID is set (leaf) or One/Two are set (branch).
+// Leaf nodes have GroupID set (an integer in JSON).
+// Branch nodes have One/Two set (nested objects in JSON).
+// Note: GroupID references layout_state.all_windows.window_groups[].id,
+// which must be dereferenced to get actual window IDs.
 type Pair struct {
-	// Leaf node
-	WindowID *int `json:"-"` // populated during unmarshal
+	// Leaf node - this is a GROUP ID, not a window ID!
+	// Use LayoutState.AllWindows.GroupToWindowID() to get actual window ID.
+	GroupID *int `json:"-"` // populated during unmarshal
 
 	// Branch node
 	Horizontal bool    `json:"horizontal,omitempty"` // default true (omitted in JSON)
@@ -41,12 +73,12 @@ type Pair struct {
 }
 
 // UnmarshalJSON handles the polymorphic pairs structure.
-// A pair can be either an int (window ID) or an object (split node).
+// A pair can be either an int (group ID) or an object (split node).
 func (p *Pair) UnmarshalJSON(data []byte) error {
-	// Try as int first (leaf node)
+	// Try as int first (leaf node - group ID)
 	var id int
 	if err := json.Unmarshal(data, &id); err == nil {
-		p.WindowID = &id
+		p.GroupID = &id
 		return nil
 	}
 
