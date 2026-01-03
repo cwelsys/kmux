@@ -2,17 +2,35 @@ package tui
 
 import "github.com/charmbracelet/lipgloss"
 
+// Catppuccin Mocha palette
 var (
-	// Colors
-	primaryColor   = lipgloss.Color("39")  // cyan
-	secondaryColor = lipgloss.Color("243") // gray
-	accentColor    = lipgloss.Color("211") // pink
-	successColor   = lipgloss.Color("78")  // green
+	// Core colors
+	blue     = lipgloss.Color("#89b4fa") // primary
+	lavender = lipgloss.Color("#b4befe") // accent
+	green    = lipgloss.Color("#a6e3a1") // success
+	peach    = lipgloss.Color("#fab387") // warning
+	red      = lipgloss.Color("#f38ba8") // error
+
+	// Neutral tones
+	text     = lipgloss.Color("#cdd6f4")
+	subtext1 = lipgloss.Color("#bac2de")
+	subtext0 = lipgloss.Color("#a6adc8")
+	overlay1 = lipgloss.Color("#7f849c")
+	overlay0 = lipgloss.Color("#6c7086")
+	surface1 = lipgloss.Color("#45475a")
+)
+
+var (
+	// Theme aliases
+	primaryColor   = blue
+	secondaryColor = overlay1
+	accentColor    = lavender
+	successColor   = green
 
 	// Borders
 	borderStyle = lipgloss.NewStyle().
 			Border(lipgloss.RoundedBorder()).
-			BorderForeground(secondaryColor)
+			BorderForeground(surface1)
 
 	// Title
 	titleStyle = lipgloss.NewStyle().
@@ -22,7 +40,8 @@ var (
 
 	// List items
 	itemStyle = lipgloss.NewStyle().
-			PaddingLeft(2)
+			PaddingLeft(2).
+			Foreground(subtext0)
 
 	selectedItemStyle = lipgloss.NewStyle().
 				PaddingLeft(1).
@@ -35,23 +54,23 @@ var (
 				SetString("●")
 
 	savedIndicator = lipgloss.NewStyle().
-			Foreground(secondaryColor).
-			SetString(" ")
+			Foreground(overlay0).
+			SetString("○")
 
 	// Help bar
 	helpStyle = lipgloss.NewStyle().
-			Foreground(secondaryColor).
+			Foreground(overlay1).
 			Padding(0, 1)
 
 	// Preview pane
 	previewTitleStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(primaryColor)
+				Foreground(lavender)
 
 	previewInfoStyle = lipgloss.NewStyle().
-				Foreground(secondaryColor)
+				Foreground(subtext1)
 
 	// Dimmed text
 	dimStyle = lipgloss.NewStyle().
-			Foreground(secondaryColor)
+			Foreground(overlay0)
 )

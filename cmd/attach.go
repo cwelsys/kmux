@@ -16,8 +16,9 @@ var (
 )
 
 var attachCmd = &cobra.Command{
-	Use:   "attach <name>",
-	Short: "Attach to a session",
+	Use:     "attach <name>",
+	Aliases: []string{"a"},
+	Short:   "Attach to a session",
 	Long:  "Attach to an existing session or create a new one.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {

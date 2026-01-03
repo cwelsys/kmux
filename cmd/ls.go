@@ -14,7 +14,7 @@ var lsAll bool
 
 var lsCmd = &cobra.Command{
 	Use:     "ls",
-	Aliases: []string{"list"},
+	Aliases: []string{"l", "list"},
 	Short:   "List sessions",
 	Long:    "List running sessions. Use --all to include restore points.",
 	RunE: func(cmd *cobra.Command, args []string) error {

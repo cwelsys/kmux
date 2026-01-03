@@ -93,26 +93,11 @@ var daemonStartCmd = &cobra.Command{
 	},
 }
 
-var daemonStatusCmd = &cobra.Command{
-	Use:   "status",
-	Short: "Check daemon status",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		c := client.New(config.SocketPath())
-
-		if c.IsRunning() {
-			fmt.Println("Daemon is running")
-			return nil
-		}
-
-		fmt.Println("Daemon is not running")
-		os.Exit(1)
-		return nil
-	},
-}
-
-var daemonKillCmd = &cobra.Command{
-	Use:   "kill-server",
-	Short: "Stop the daemon",
+// Top-level daemon commands
+var killServerCmd = &cobra.Command{
+	Use:     "kill-server",
+	Aliases: []string{"ks"},
+	Short:   "Stop the daemon",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := client.New(config.SocketPath())
 
@@ -130,11 +115,32 @@ var daemonKillCmd = &cobra.Command{
 	},
 }
 
+var statusCmd = &cobra.Command{
+	Use:     "status",
+	Aliases: []string{"s"},
+	Short:   "Check daemon status",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		c := client.New(config.SocketPath())
+
+		if c.IsRunning() {
+			fmt.Println("Daemon is running")
+			return nil
+		}
+
+		fmt.Println("Daemon is not running")
+		os.Exit(1)
+		return nil
+	},
+}
+
 func init() {
 	daemonStartCmd.Flags().BoolP("foreground", "f", false, "Run in foreground")
 
+	// Only 'start' stays nested under daemon (rarely typed manually)
 	daemonCmd.AddCommand(daemonStartCmd)
-	daemonCmd.AddCommand(daemonStatusCmd)
-	daemonCmd.AddCommand(daemonKillCmd)
 	rootCmd.AddCommand(daemonCmd)
+
+	// Common daemon commands at top level
+	rootCmd.AddCommand(killServerCmd)
+	rootCmd.AddCommand(statusCmd)
 }

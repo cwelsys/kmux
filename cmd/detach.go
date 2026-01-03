@@ -11,8 +11,9 @@ import (
 )
 
 var detachCmd = &cobra.Command{
-	Use:   "detach [session]",
-	Short: "Detach from a session",
+	Use:     "detach [session]",
+	Aliases: []string{"d"},
+	Short:   "Detach from a session",
 	Long: `Save session state and close session windows.
 
 If session name is provided, detaches that session.

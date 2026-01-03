@@ -16,6 +16,16 @@ var rootCmd = &cobra.Command{
 	},
 }
 
+func init() {
+	rootCmd.SetHelpCommand(&cobra.Command{
+		Use:   "help",
+		Short: "Print this help message",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return rootCmd.Help()
+		},
+	})
+}
+
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
