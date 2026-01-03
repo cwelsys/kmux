@@ -670,7 +670,7 @@ func (s *Server) handleSplit(k *kitty.Client, params protocol.SplitParams) proto
 		Location: location,
 		CWD:      cwd,
 		Cmd:      zmxCmd,
-		Env:      map[string]string{"KMUX_SESSION": sessionName},
+		Env:      nil,
 	}
 
 	windowID, err := k.Launch(opts)

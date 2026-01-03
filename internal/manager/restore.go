@@ -86,7 +86,7 @@ func RestoreTab(
 			Title:    tab.Title,
 			Location: location,
 			Cmd:      zmxCmd,
-			Env:      map[string]string{"KMUX_SESSION": session.Name},
+			Env:      nil,
 		}
 
 		id, err := k.Launch(opts)
