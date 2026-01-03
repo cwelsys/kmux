@@ -835,6 +835,11 @@ func (s *Server) pollState() {
 			delete(s.state.Mappings, windowID)
 		}
 	}
+	for windowID := range s.state.WindowSessions {
+		if !currentWindowIDs[windowID] {
+			delete(s.state.WindowSessions, windowID)
+		}
+	}
 
 	s.mu.Unlock()
 
