@@ -31,6 +31,7 @@ type DaemonState struct {
 	Sessions       map[string]*SessionState
 	Mappings       map[int]string // kitty_window_id -> zmx_name (AUTHORITATIVE)
 	WindowSessions map[int]string // kitty_window_id -> session_name (AUTHORITATIVE)
+	ZmxOwnership   map[string]string // zmx_name -> session_name (AUTHORITATIVE for rename)
 	KittyState     kitty.KittyState
 	ZmxSessions    []string
 	LastPoll       time.Time
@@ -68,6 +69,7 @@ func New(socketPath, dataDir string) *Server {
 			Sessions:       make(map[string]*SessionState),
 			Mappings:       make(map[int]string),
 			WindowSessions: make(map[int]string),
+			ZmxOwnership:   make(map[string]string),
 		},
 	}
 }
@@ -320,15 +322,30 @@ func (s *Server) handleSessions(k *kitty.Client, params protocol.SessionsParams)
 	// Query reality - zmx for running sessions, kitty for attached windows
 	zmxSessions, _ := s.zmx.List()
 
-	// Extract unique session names from zmx (format: session.tab.window)
+	// Copy ZmxOwnership to avoid holding lock during iteration
+	s.mu.Lock()
+	zmxOwnership := make(map[string]string)
+	for k, v := range s.state.ZmxOwnership {
+		zmxOwnership[k] = v
+	}
+	s.mu.Unlock()
+
+	// Extract unique session names from zmx using ownership map
 	zmxBySession := make(map[string]int) // session name -> pane count
 	for _, z := range zmxSessions {
-		for i, c := range z {
-			if c == '.' {
-				name := z[:i]
-				zmxBySession[name]++
-				break
+		// Use ownership map for renamed sessions
+		name := zmxOwnership[z]
+		if name == "" {
+			// Fallback to prefix for sessions created outside kmux or before daemon started
+			for i, c := range z {
+				if c == '.' {
+					name = z[:i]
+					break
+				}
 			}
+		}
+		if name != "" {
+			zmxBySession[name]++
 		}
 	}
 
@@ -459,7 +476,8 @@ func (s *Server) handleAttach(k *kitty.Client, params protocol.AttachParams) pro
 	s.mu.Lock()
 	for _, c := range allCreations {
 		s.state.Mappings[c.KittyWindowID] = c.ZmxName
-		s.state.WindowSessions[c.KittyWindowID] = name // NEW: record session membership
+		s.state.WindowSessions[c.KittyWindowID] = name
+		s.state.ZmxOwnership[c.ZmxName] = name // zmx -> session for rename support
 	}
 	// Update session state
 	panes := 0
@@ -545,15 +563,36 @@ func (s *Server) handleKill(k *kitty.Client, params protocol.KillParams) protoco
 		return protocol.ErrorResponse(err.Error())
 	}
 
-	// Kill all zmx sessions that belong to this session (by prefix matching)
-	// This is more robust than relying on saved session.ZmxSessions
-	// since splits created after initial attach won't be in the saved list
+	// Kill all zmx sessions that belong to this session
+	// Use ZmxOwnership for renamed sessions, fallback to prefix matching
+	s.mu.Lock()
+	zmxOwnership := make(map[string]string)
+	for k, v := range s.state.ZmxOwnership {
+		zmxOwnership[k] = v
+	}
+	s.mu.Unlock()
+
 	running, _ := s.zmx.List()
 	for _, r := range running {
+		// Check ownership first (for renamed sessions)
+		if zmxOwnership[r] == name {
+			s.zmx.Kill(r)
+			continue
+		}
+		// Fallback to prefix matching for sessions created outside kmux
 		if len(r) > len(name) && r[:len(name)+1] == name+"." {
 			s.zmx.Kill(r)
 		}
 	}
+
+	// Clean up ZmxOwnership entries for killed zmx sessions
+	s.mu.Lock()
+	for zmxName, sessName := range s.state.ZmxOwnership {
+		if sessName == name {
+			delete(s.state.ZmxOwnership, zmxName)
+		}
+	}
+	s.mu.Unlock()
 
 	// Close any kitty windows for this session
 	state, _ := k.GetState()
@@ -690,7 +729,8 @@ func (s *Server) handleSplit(k *kitty.Client, params protocol.SplitParams) proto
 	// RECORD the mapping - this is the authoritative source
 	s.mu.Lock()
 	s.state.Mappings[windowID] = zmxName
-	s.state.WindowSessions[windowID] = sessionName // RECORD session membership
+	s.state.WindowSessions[windowID] = sessionName
+	s.state.ZmxOwnership[zmxName] = sessionName // zmx -> session for rename support
 	if sess, ok := s.state.Sessions[sessionName]; ok {
 		sess.Panes++
 		sess.LastSeen = time.Now()
@@ -751,6 +791,13 @@ func (s *Server) handleRename(params protocol.RenameParams) protocol.Response {
 			s.state.WindowSessions[windowID] = newName
 		}
 	}
+
+	// Update ZmxOwnership mappings
+	for zmxName, sessName := range s.state.ZmxOwnership {
+		if sessName == oldName {
+			s.state.ZmxOwnership[zmxName] = newName
+		}
+	}
 	s.mu.Unlock()
 
 	// Rename save file
@@ -787,14 +834,30 @@ func (s *Server) pollState() {
 	// Poll zmx
 	zmxSessions, _ := s.zmx.List()
 
-	// Extract session names from zmx
+	// Copy ZmxOwnership before using it
+	s.mu.Lock()
+	zmxOwnership := make(map[string]string)
+	for k, v := range s.state.ZmxOwnership {
+		zmxOwnership[k] = v
+	}
+	s.mu.Unlock()
+
+	// Extract session names from zmx using ownership map
 	zmxBySession := make(map[string]bool)
 	for _, z := range zmxSessions {
-		for i, c := range z {
-			if c == '.' {
-				zmxBySession[z[:i]] = true
-				break
+		// Use ownership map for renamed sessions
+		name := zmxOwnership[z]
+		if name == "" {
+			// Fallback to prefix for sessions created outside kmux
+			for i, c := range z {
+				if c == '.' {
+					name = z[:i]
+					break
+				}
 			}
+		}
+		if name != "" {
+			zmxBySession[name] = true
 		}
 	}
 
