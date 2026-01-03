@@ -3,6 +3,7 @@ package zmx
 import (
 	"bytes"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -90,10 +91,16 @@ func AttachCmd(sessionName string, cmd ...string) []string {
 		return nil
 	}
 	args := []string{"zmx", "attach", sessionName}
-	// Only append non-empty command strings
+	// Append command through interactive shell (loads user's PATH)
 	for _, c := range cmd {
 		if c != "" {
-			args = append(args, c)
+			// Use user's shell interactively to get proper PATH
+			shell := os.Getenv("SHELL")
+			if shell == "" {
+				shell = "/bin/sh"
+			}
+			args = append(args, shell, "-ic", c)
+			break // only one command supported
 		}
 	}
 	return args
