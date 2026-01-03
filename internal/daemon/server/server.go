@@ -851,10 +851,12 @@ func (s *Server) handleSplit(k *kitty.Client, params protocol.SplitParams) proto
 func (s *Server) handleResolve(params protocol.ResolveParams) protocol.Response {
 	s.mu.Lock()
 	session := s.state.WindowSessions[params.WindowID]
+	zmxName := s.state.Mappings[params.WindowID]
 	s.mu.Unlock()
 
 	return protocol.SuccessResponse(protocol.ResolveResult{
 		Session: session,
+		ZmxName: zmxName,
 	})
 }
 

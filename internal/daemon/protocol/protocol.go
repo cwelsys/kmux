@@ -86,7 +86,8 @@ type ResolveParams struct {
 
 // ResolveResult from resolve method.
 type ResolveResult struct {
-	Session string `json:"session"` // session name, empty if not found
+	Session string `json:"session"`  // session name, empty if not found
+	ZmxName string `json:"zmx_name"` // zmx session name
 }
 
 // RenameParams for rename method.

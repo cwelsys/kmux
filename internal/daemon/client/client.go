@@ -213,24 +213,30 @@ func (c *Client) Split(session, direction, cwd string) (int, error) {
 
 // Resolve looks up which session owns a window.
 func (c *Client) Resolve(windowID int) (string, error) {
+	session, _, err := c.ResolveWindow(windowID)
+	return session, err
+}
+
+// ResolveWindow looks up which session and zmx name owns a window.
+func (c *Client) ResolveWindow(windowID int) (session, zmxName string, err error) {
 	req, err := protocol.NewRequestWithParams(protocol.MethodResolve, c.kittySocket, protocol.ResolveParams{
 		WindowID: windowID,
 	})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	resp, err := c.call(req)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	var result protocol.ResolveResult
 	if err := json.Unmarshal(resp.Result, &result); err != nil {
-		return "", fmt.Errorf("unmarshal: %w", err)
+		return "", "", fmt.Errorf("unmarshal: %w", err)
 	}
 
-	return result.Session, nil
+	return result.Session, result.ZmxName, nil
 }
 
 // Rename renames a session.
