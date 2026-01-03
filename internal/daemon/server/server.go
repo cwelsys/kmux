@@ -182,6 +182,18 @@ func (s *Server) handleRequest(req protocol.Request) protocol.Response {
 			return protocol.ErrorResponse(fmt.Sprintf("invalid params: %v", err))
 		}
 		return s.handleSplit(k, params)
+	case protocol.MethodResolve:
+		var params protocol.ResolveParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return protocol.ErrorResponse(fmt.Sprintf("invalid params: %v", err))
+		}
+		return s.handleResolve(params)
+	case protocol.MethodRename:
+		var params protocol.RenameParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			return protocol.ErrorResponse(fmt.Sprintf("invalid params: %v", err))
+		}
+		return s.handleRename(params)
 	default:
 		return protocol.ErrorResponse(fmt.Sprintf("unknown method: %s", req.Method))
 	}
@@ -681,6 +693,21 @@ func (s *Server) handleSplit(k *kitty.Client, params protocol.SplitParams) proto
 		WindowID: windowID,
 		Message:  fmt.Sprintf("Created %s split in session %s", params.Direction, sessionName),
 	})
+}
+
+func (s *Server) handleResolve(params protocol.ResolveParams) protocol.Response {
+	s.mu.Lock()
+	session := s.state.WindowSessions[params.WindowID]
+	s.mu.Unlock()
+
+	return protocol.SuccessResponse(protocol.ResolveResult{
+		Session: session,
+	})
+}
+
+func (s *Server) handleRename(params protocol.RenameParams) protocol.Response {
+	// TODO: Implement in Task 7
+	return protocol.ErrorResponse("rename not yet implemented")
 }
 
 func (s *Server) runPollingLoop() {
