@@ -34,7 +34,7 @@ func runTUI() error {
 
 	switch action {
 	case "attach":
-		return c.Attach(session, "")
+		return c.Attach(session, "", "")
 	case "kill":
 		return c.Kill(session)
 	}

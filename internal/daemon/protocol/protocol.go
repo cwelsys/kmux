@@ -43,8 +43,9 @@ type SessionsParams struct {
 
 // AttachParams for attach method.
 type AttachParams struct {
-	Name string `json:"name"`
-	CWD  string `json:"cwd,omitempty"`
+	Name   string `json:"name"`
+	CWD    string `json:"cwd,omitempty"`
+	Layout string `json:"layout,omitempty"` // layout template name
 }
 
 // DetachParams for detach method.

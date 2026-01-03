@@ -10,6 +10,11 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var (
+	attachLayout string
+	attachCWD    string
+)
+
 var attachCmd = &cobra.Command{
 	Use:   "attach <name>",
 	Short: "Attach to a session",
@@ -28,9 +33,12 @@ var attachCmd = &cobra.Command{
 			return fmt.Errorf("daemon: %w", err)
 		}
 
-		cwd, _ := os.Getwd()
+		cwd := attachCWD
+		if cwd == "" {
+			cwd, _ = os.Getwd()
+		}
 
-		if err := c.Attach(name, cwd); err != nil {
+		if err := c.Attach(name, cwd, attachLayout); err != nil {
 			return err
 		}
 
@@ -40,5 +48,7 @@ var attachCmd = &cobra.Command{
 }
 
 func init() {
+	attachCmd.Flags().StringVarP(&attachLayout, "layout", "l", "", "create session from layout template")
+	attachCmd.Flags().StringVarP(&attachCWD, "cwd", "C", "", "working directory for panes")
 	rootCmd.AddCommand(attachCmd)
 }

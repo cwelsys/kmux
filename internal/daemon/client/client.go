@@ -122,11 +122,12 @@ func (c *Client) Sessions(includeRestorePoints bool) ([]protocol.SessionInfo, er
 	return sessions, nil
 }
 
-// Attach attaches to a session (creates if new).
-func (c *Client) Attach(name, cwd string) error {
+// Attach attaches to or creates a session.
+func (c *Client) Attach(name, cwd, layout string) error {
 	req, err := protocol.NewRequestWithParams(protocol.MethodAttach, c.kittySocket, protocol.AttachParams{
-		Name: name,
-		CWD:  cwd,
+		Name:   name,
+		CWD:    cwd,
+		Layout: layout,
 	})
 	if err != nil {
 		return err
