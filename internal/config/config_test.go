@@ -42,3 +42,39 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("AutoSaveInterval = %d, want 900", cfg.AutoSaveInterval)
 	}
 }
+
+func TestConfigDir(t *testing.T) {
+	// Clear env for clean test
+	os.Unsetenv("KMUX_CONFIG_DIR")
+	os.Unsetenv("XDG_CONFIG_HOME")
+
+	dir := ConfigDir()
+
+	// Should default to ~/.config/kmux
+	home, _ := os.UserHomeDir()
+	expected := filepath.Join(home, ".config", "kmux")
+	if dir != expected {
+		t.Errorf("ConfigDir() = %q, want %q", dir, expected)
+	}
+}
+
+func TestConfigDirWithEnv(t *testing.T) {
+	os.Setenv("KMUX_CONFIG_DIR", "/custom/config")
+	defer os.Unsetenv("KMUX_CONFIG_DIR")
+
+	dir := ConfigDir()
+	if dir != "/custom/config" {
+		t.Errorf("ConfigDir() = %q, want %q", dir, "/custom/config")
+	}
+}
+
+func TestConfigDirWithXDG(t *testing.T) {
+	os.Unsetenv("KMUX_CONFIG_DIR")
+	os.Setenv("XDG_CONFIG_HOME", "/xdg/config")
+	defer os.Unsetenv("XDG_CONFIG_HOME")
+
+	dir := ConfigDir()
+	if dir != "/xdg/config/kmux" {
+		t.Errorf("ConfigDir() = %q, want %q", dir, "/xdg/config/kmux")
+	}
+}

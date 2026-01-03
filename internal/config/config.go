@@ -49,3 +49,18 @@ func DataDir() string {
 
 	return filepath.Join(dataHome, "kmux")
 }
+
+// ConfigDir returns the config directory for user settings and layouts.
+func ConfigDir() string {
+	if dir := os.Getenv("KMUX_CONFIG_DIR"); dir != "" {
+		return dir
+	}
+
+	configHome := os.Getenv("XDG_CONFIG_HOME")
+	if configHome == "" {
+		home, _ := os.UserHomeDir()
+		configHome = filepath.Join(home, ".config")
+	}
+
+	return filepath.Join(configHome, "kmux")
+}
