@@ -52,6 +52,14 @@ func LoadConfig() (*Config, error) {
 		return nil, fmt.Errorf("parse config: %w", err)
 	}
 
+	// Validate and fix invalid values
+	if cfg.Daemon.WatchInterval < 1 {
+		cfg.Daemon.WatchInterval = 5 // default
+	}
+	if cfg.Daemon.AutoSaveInterval < 1 {
+		cfg.Daemon.AutoSaveInterval = 900 // default
+	}
+
 	return cfg, nil
 }
 

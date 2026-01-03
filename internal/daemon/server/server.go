@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -91,6 +92,14 @@ func New(socketPath, dataDir string) *Server {
 
 // Start starts the daemon server.
 func (s *Server) Start() error {
+	// Log config on startup
+	log.Printf("kmux daemon starting")
+	log.Printf("  config: watch_interval=%ds, auto_save_interval=%ds",
+		s.cfg.Daemon.WatchInterval, s.cfg.Daemon.AutoSaveInterval)
+	if s.cfg.Kitty.Socket != "" {
+		log.Printf("  config: kitty_socket=%s", s.cfg.Kitty.Socket)
+	}
+
 	// Create socket directory
 	dir := filepath.Dir(s.socketPath)
 	if err := os.MkdirAll(dir, 0700); err != nil {
