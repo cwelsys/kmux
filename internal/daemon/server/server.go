@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -324,6 +325,35 @@ func countZmxPanes(zmxSessions []string, sessionName string) int {
 	return count
 }
 
+// layoutToSession converts a layout template to a session.
+func layoutToSession(layout *config.Layout, name, cwd string) *model.Session {
+	session := &model.Session{
+		Name:    name,
+		Host:    "local",
+		SavedAt: time.Now(),
+	}
+
+	for _, ltab := range layout.Tabs {
+		tab := model.Tab{
+			Title:  ltab.Title,
+			Layout: ltab.Layout,
+		}
+
+		// Create windows from panes
+		for _, pane := range ltab.Panes {
+			window := model.Window{
+				CWD:     cwd,
+				Command: pane,
+			}
+			tab.Windows = append(tab.Windows, window)
+		}
+
+		session.Tabs = append(session.Tabs, tab)
+	}
+
+	return session
+}
+
 func (s *Server) handleSessions(k *kitty.Client, params protocol.SessionsParams) protocol.Response {
 	// Query reality - zmx for running sessions, kitty for attached windows
 	zmxSessions, _ := s.zmx.List()
@@ -432,27 +462,72 @@ func (s *Server) handleAttach(k *kitty.Client, params protocol.AttachParams) pro
 		return protocol.ErrorResponse(err.Error())
 	}
 
-	// Try to load existing session
-	session, err := s.store.LoadSession(name)
-	if err != nil {
-		// Create new session
-		cwd := params.CWD
-		if cwd == "" {
-			cwd = "/"
+	cwd := params.CWD
+	if cwd == "" {
+		cwd = "/"
+	}
+
+	var session *model.Session
+
+	// Check for running zmx sessions first
+	allZmxSessions, _ := s.zmx.List()
+
+	// Copy ZmxOwnership to check for renamed sessions
+	s.mu.Lock()
+	zmxOwnership := make(map[string]string)
+	for k, v := range s.state.ZmxOwnership {
+		zmxOwnership[k] = v
+	}
+	s.mu.Unlock()
+
+	var matchingZmxSessions []string
+	for _, z := range allZmxSessions {
+		// Use ownership map for renamed sessions
+		sessionName := zmxOwnership[z]
+		if sessionName == "" {
+			// Fallback to prefix for sessions created outside kmux or before daemon started
+			if idx := strings.Index(z, "."); idx > 0 {
+				sessionName = z[:idx]
+			}
 		}
-		session = &model.Session{
-			Name:    name,
-			Host:    "local",
-			SavedAt: time.Now(),
-			Tabs: []model.Tab{
-				{
-					Title:  name,
-					Layout: "splits",
-					Windows: []model.Window{
-						{CWD: cwd},
-					},
+		if sessionName == name {
+			matchingZmxSessions = append(matchingZmxSessions, z)
+		}
+	}
+
+	if len(matchingZmxSessions) > 0 {
+		// Session is running - reattach (ignore layout)
+		session, _ = s.store.LoadSession(name)
+		if session == nil {
+			// Create minimal session for running zmx
+			session = &model.Session{
+				Name:    name,
+				Host:    "local",
+				SavedAt: time.Now(),
+				Tabs: []model.Tab{
+					{Title: name, Layout: "splits", Windows: []model.Window{{CWD: cwd}}},
 				},
-			},
+			}
+		}
+	} else if params.Layout != "" {
+		// New session with layout template
+		layout, err := store.LoadLayout(params.Layout)
+		if err != nil {
+			return protocol.ErrorResponse(fmt.Sprintf("load layout: %v", err))
+		}
+		session = layoutToSession(layout, name, cwd)
+	} else {
+		// Try to load restore point, or create fresh
+		session, _ = s.store.LoadSession(name)
+		if session == nil {
+			session = &model.Session{
+				Name:    name,
+				Host:    "local",
+				SavedAt: time.Now(),
+				Tabs: []model.Tab{
+					{Title: name, Layout: "splits", Windows: []model.Window{{CWD: cwd}}},
+				},
+			}
 		}
 	}
 
