@@ -476,8 +476,12 @@ func (s *Server) handleDetach(k *kitty.Client, params protocol.DetachParams) pro
 		return protocol.ErrorResponse(fmt.Sprintf("get kitty state: %v", err))
 	}
 
-	// Derive session from current state
-	session := manager.DeriveSession(name, state)
+	// Derive session from current state using mappings
+	s.mu.Lock()
+	mappings := s.state.Mappings
+	s.mu.Unlock()
+
+	session := manager.DeriveSession(name, state, mappings)
 
 	// Save session
 	if err := s.store.SaveSession(session); err != nil {
@@ -841,7 +845,11 @@ func (s *Server) autoSaveAll() {
 
 	// Save each attached session
 	for _, name := range attachedSessions {
-		session := manager.DeriveSession(name, kittyState)
+		s.mu.Lock()
+		mappings := s.state.Mappings
+		s.mu.Unlock()
+
+		session := manager.DeriveSession(name, kittyState, mappings)
 		if len(session.Tabs) > 0 {
 			s.store.SaveSession(session)
 		}
@@ -852,13 +860,14 @@ func (s *Server) autoSaveAll() {
 func (s *Server) saveSession(name string) {
 	s.mu.Lock()
 	kittyState := s.state.KittyState
+	mappings := s.state.Mappings
 	s.mu.Unlock()
 
 	if len(kittyState) == 0 {
 		return
 	}
 
-	session := manager.DeriveSession(name, kittyState)
+	session := manager.DeriveSession(name, kittyState, mappings)
 	if len(session.Tabs) > 0 {
 		s.store.SaveSession(session)
 	}
