@@ -653,8 +653,9 @@ func (s *Server) handleSplit(k *kitty.Client, params protocol.SplitParams) proto
 		return protocol.ErrorResponse(fmt.Sprintf("launch split: %v", err))
 	}
 
-	// Update internal state
+	// RECORD the mapping - this is the authoritative source
 	s.mu.Lock()
+	s.state.Mappings[windowID] = zmxName
 	if sess, ok := s.state.Sessions[sessionName]; ok {
 		sess.Panes++
 		sess.LastSeen = time.Now()
