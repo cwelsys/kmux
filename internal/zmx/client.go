@@ -17,6 +17,7 @@ func NewClient() *Client {
 
 // ParseList parses output from `zmx list`.
 // Format: session_name=NAME\tpid=PID\tclients=N
+// Sessions with status=Timeout (cleaning up) are filtered out.
 func ParseList(output string) []string {
 	output = strings.TrimSpace(output)
 	if output == "" || strings.Contains(output, "no sessions found") {
@@ -28,6 +29,10 @@ func ParseList(output string) []string {
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
 		if line == "" {
+			continue
+		}
+		// Skip sessions that are cleaning up
+		if strings.Contains(line, "cleaning up") {
 			continue
 		}
 		// Extract session name from "session_name=NAME\t..."

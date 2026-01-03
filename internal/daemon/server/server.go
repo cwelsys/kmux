@@ -599,26 +599,42 @@ func (s *Server) handleSplit(k *kitty.Client, params protocol.SplitParams) proto
 		return protocol.ErrorResponse("no kitty windows found")
 	}
 
-	// Find the tab containing windows for this session
-	var targetTabIdx int = -1
-	var windowCount int
+	// Find windows for this session, grouped by kitty tab
+	// We need session-relative tab index (not kitty tab index)
+	type tabInfo struct {
+		kittyTabID int
+		windowIDs  []int
+	}
+	var sessionTabs []tabInfo
+
 	for _, osWin := range state {
-		for tabIdx, tab := range osWin.Tabs {
+		for _, tab := range osWin.Tabs {
+			var windowsInTab []int
 			for _, win := range tab.Windows {
 				if win.Env["KMUX_SESSION"] == sessionName {
-					targetTabIdx = tabIdx
-					windowCount++
+					windowsInTab = append(windowsInTab, win.ID)
 				}
+			}
+			if len(windowsInTab) > 0 {
+				sessionTabs = append(sessionTabs, tabInfo{
+					kittyTabID: tab.ID,
+					windowIDs:  windowsInTab,
+				})
 			}
 		}
 	}
 
-	if targetTabIdx == -1 {
+	if len(sessionTabs) == 0 {
 		return protocol.ErrorResponse(fmt.Sprintf("no windows found for session: %s", sessionName))
 	}
 
-	// Build zmx session name: {session}.{tab}.{window}
-	zmxName := fmt.Sprintf("%s.%d.%d", sessionName, targetTabIdx, windowCount)
+	// For now, assume single-tab sessions (tab index = 0)
+	// The new window will be at index = current window count in first tab
+	sessionTabIdx := 0
+	windowIdx := len(sessionTabs[0].windowIDs)
+
+	// Build zmx session name: {session}.{session_tab_idx}.{window_idx}
+	zmxName := fmt.Sprintf("%s.%d.%d", sessionName, sessionTabIdx, windowIdx)
 	zmxCmd := zmx.AttachCmd(zmxName, "")
 
 	// Launch the split window with zmx

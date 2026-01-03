@@ -11,13 +11,23 @@ import (
 )
 
 var detachCmd = &cobra.Command{
-	Use:   "detach",
-	Short: "Detach from current session",
-	Long:  "Save current session state and close session windows.",
+	Use:   "detach [session]",
+	Short: "Detach from a session",
+	Long: `Save session state and close session windows.
+
+If session name is provided, detaches that session.
+Otherwise uses $KMUX_SESSION from the environment.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		sessionName := os.Getenv("KMUX_SESSION")
+		var sessionName string
+		if len(args) > 0 {
+			sessionName = args[0]
+		} else {
+			sessionName = os.Getenv("KMUX_SESSION")
+		}
+
 		if sessionName == "" {
-			return fmt.Errorf("not in a kmux session (KMUX_SESSION not set)")
+			return fmt.Errorf("session name required (provide as argument or run from within a session)")
 		}
 
 		if err := store.ValidateSessionName(sessionName); err != nil {
