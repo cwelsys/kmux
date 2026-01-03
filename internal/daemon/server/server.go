@@ -439,6 +439,7 @@ func (s *Server) handleAttach(k *kitty.Client, params protocol.AttachParams) pro
 	s.mu.Lock()
 	for _, c := range allCreations {
 		s.state.Mappings[c.KittyWindowID] = c.ZmxName
+		s.state.WindowSessions[c.KittyWindowID] = name // NEW: record session membership
 	}
 	// Update session state
 	panes := 0
