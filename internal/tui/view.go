@@ -26,6 +26,19 @@ func (m Model) View() string {
 		return m.viewHelp()
 	}
 
+	if m.renameMode {
+		selectedName := ""
+		if m.cursor < len(m.sessions) {
+			selectedName = m.sessions[m.cursor].Name
+		}
+		return fmt.Sprintf(
+			"%s\n\n%s\n\n%s",
+			titleStyle.Render("Rename Session"),
+			fmt.Sprintf("Renaming: %s", selectedName),
+			m.renameInput.View(),
+		)
+	}
+
 	// Calculate pane widths
 	listWidth := m.width/2 - 2
 	previewWidth := m.width - listWidth - 4

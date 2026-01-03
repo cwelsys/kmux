@@ -19,6 +19,8 @@ type Model struct {
 	cursor      int
 	filterInput textinput.Model
 	filterMode  bool
+	renameMode  bool
+	renameInput textinput.Model
 	showHelp    bool
 	confirmKill bool
 	width       int
@@ -35,8 +37,13 @@ func New(c *client.Client) Model {
 	ti.Placeholder = "filter..."
 	ti.CharLimit = 50
 
+	ri := textinput.New()
+	ri.Placeholder = "new name..."
+	ri.CharLimit = 50
+
 	return Model{
 		filterInput: ti,
+		renameInput: ri,
 		client:      c,
 	}
 }
@@ -109,6 +116,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 
+	// Handle text input in rename mode
+	if m.renameMode {
+		var cmd tea.Cmd
+		m.renameInput, cmd = m.renameInput.Update(msg)
+		return m, cmd
+	}
+
 	return m, nil
 }
 
@@ -116,29 +130,33 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Global keys
 	switch msg.String() {
 	case "ctrl+c", "q":
-		if m.confirmKill || m.showHelp || m.filterMode {
+		if m.confirmKill || m.showHelp || m.filterMode || m.renameMode {
 			m.confirmKill = false
 			m.showHelp = false
 			m.filterMode = false
 			m.filterInput.Blur()
+			m.renameMode = false
+			m.renameInput.Blur()
 			return m, nil
 		}
 		m.quitting = true
 		return m, tea.Quit
 
 	case "esc":
-		if m.confirmKill || m.showHelp || m.filterMode {
+		if m.confirmKill || m.showHelp || m.filterMode || m.renameMode {
 			m.confirmKill = false
 			m.showHelp = false
 			m.filterMode = false
 			m.filterInput.Blur()
+			m.renameMode = false
+			m.renameInput.Blur()
 			return m, nil
 		}
 		m.quitting = true
 		return m, tea.Quit
 
 	case "?":
-		if !m.filterMode && !m.confirmKill {
+		if !m.filterMode && !m.confirmKill && !m.renameMode {
 			m.showHelp = !m.showHelp
 		}
 		return m, nil
@@ -155,6 +173,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.filterMode {
 		return m.handleFilterMode(msg)
+	}
+
+	if m.renameMode {
+		return m.handleRenameMode(msg)
 	}
 
 	// Normal mode navigation
@@ -178,7 +200,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.confirmKill = true
 		}
 	case "r":
-		// TODO: rename functionality
+		if len(m.sessions) > 0 {
+			m.renameMode = true
+			m.renameInput.SetValue("")
+			m.renameInput.Focus()
+			return m, textinput.Blink
+		}
 	case "/":
 		m.filterMode = true
 		m.filterInput.Focus()
@@ -214,6 +241,29 @@ func (m Model) handleFilterMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	default:
 		var cmd tea.Cmd
 		m.filterInput, cmd = m.filterInput.Update(msg)
+		return m, cmd
+	}
+	return m, nil
+}
+
+func (m Model) handleRenameMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		newName := m.renameInput.Value()
+		if newName != "" && m.SelectedSession() != "" {
+			if err := m.client.Rename(m.SelectedSession(), newName); err == nil {
+				m.sessions[m.cursor].Name = newName
+			}
+		}
+		m.renameMode = false
+		m.renameInput.Blur()
+		return m, m.loadSessions
+	case "esc":
+		m.renameMode = false
+		m.renameInput.Blur()
+	default:
+		var cmd tea.Cmd
+		m.renameInput, cmd = m.renameInput.Update(msg)
 		return m, cmd
 	}
 	return m, nil
