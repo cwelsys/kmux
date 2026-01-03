@@ -42,7 +42,8 @@ func TestDeriveSession(t *testing.T) {
 		},
 	}
 
-	session := DeriveSession("myproject", state)
+	// Test doesn't verify zmx names, so pass empty map
+	session := DeriveSession("myproject", state, map[int]string{})
 
 	if session.Name != "myproject" {
 		t.Errorf("Name = %s, want myproject", session.Name)
@@ -95,7 +96,8 @@ func TestDeriveSession_WithSplits(t *testing.T) {
 		},
 	}
 
-	session := DeriveSession("test", state)
+	// Test doesn't verify zmx names, so pass empty map
+	session := DeriveSession("test", state, map[int]string{})
 
 	if len(session.Tabs) != 1 {
 		t.Fatalf("expected 1 tab, got %d", len(session.Tabs))
