@@ -1,6 +1,11 @@
 package tui
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/cwel/kmux/internal/config"
@@ -59,6 +64,9 @@ type Model struct {
 	launchNameFocus bool // true = name field focused, false = layout list focused
 	launchLayout    string
 	launchName      string
+
+	// Yazi result
+	yaziPath string // path selected from yazi
 }
 
 // New creates a new TUI model.
@@ -178,6 +186,11 @@ func (m Model) LaunchName() string {
 	return m.launchName
 }
 
+// BrowserPath returns the path selected from yazi, or empty if none.
+func (m Model) BrowserPath() string {
+	return m.yaziPath
+}
+
 // rebuildItems creates the unified items list from sessions and projects.
 func (m *Model) rebuildItems() {
 	m.allItems = make([]Item, 0, len(m.sessions)+len(m.projects))
@@ -228,6 +241,24 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case errMsg:
 		m.err = msg.err
 		return m, nil
+
+	case yaziFinishedMsg:
+		if msg.err != nil {
+			// Show error to user
+			m.err = msg.err
+			return m, nil
+		}
+		if msg.path == "" {
+			// User cancelled - just return to TUI
+			return m, nil
+		}
+		// Got a path from yazi - create session
+		m.yaziPath = msg.path
+		m.launchName = filepath.Base(msg.path)
+		m.launchLayout = ""
+		m.action = "create"
+		m.quitting = true
+		return m, tea.Quit
 	}
 
 	// Handle text input in filter mode
@@ -378,6 +409,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// Pre-fill name with project name
 			m.launchNameInput.SetValue(project.Name)
 		}
+	case "z":
+		// Open yazi file browser
+		return m, m.openYazi()
 	}
 
 	return m, nil
@@ -441,6 +475,52 @@ func (m Model) handleLaunchMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// yaziFinishedMsg is sent when yazi exits
+type yaziFinishedMsg struct {
+	path string
+	err  error
+}
+
+// openYazi spawns yazi using tea.ExecProcess (takes over terminal)
+func (m Model) openYazi() tea.Cmd {
+	startPath := ""
+	if m.cfg != nil {
+		startPath = m.cfg.BrowserStartPath()
+	}
+	if startPath == "" {
+		startPath, _ = os.UserHomeDir()
+	}
+
+	// Create temp file for yazi to write selection to
+	tmpFile := "/tmp/kmux-yazi-choice"
+	os.Remove(tmpFile)
+
+	// Build yazi command - run through user's login shell to get proper PATH
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "sh"
+	}
+	shellCmd := "yazi --chooser-file=" + tmpFile + " " + startPath
+	cmd := exec.Command(shell, "-l", "-c", shellCmd)
+
+	// Use tea.ExecProcess to let yazi take over the terminal
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if err != nil {
+			return yaziFinishedMsg{err: err}
+		}
+
+		// Check if yazi wrote a selection
+		data, err := os.ReadFile(tmpFile)
+		os.Remove(tmpFile)
+		if err != nil {
+			return yaziFinishedMsg{} // No selection (user cancelled)
+		}
+
+		path := strings.TrimSpace(string(data))
+		return yaziFinishedMsg{path: path}
+	})
 }
 
 func (m Model) handleConfirmKill(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

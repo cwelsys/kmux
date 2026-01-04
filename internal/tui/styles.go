@@ -57,6 +57,15 @@ var (
 			Foreground(overlay0).
 			SetString("○")
 
+	projectIndicator = lipgloss.NewStyle().
+				Foreground(peach).
+				SetString("◆")
+
+	// Section header style
+	sectionHeaderStyle = lipgloss.NewStyle().
+				Foreground(overlay1).
+				Bold(true)
+
 	// Help bar
 	helpStyle = lipgloss.NewStyle().
 			Foreground(overlay1).

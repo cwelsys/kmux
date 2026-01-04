@@ -44,17 +44,30 @@ func runTUI() error {
 		}
 		return c.Attach(session, "", "")
 	case "create":
-		project := result.SelectedProject()
-		if project == nil {
+		// Determine path and name - either from browser or project selection
+		var path, name string
+
+		if browserPath := result.BrowserPath(); browserPath != "" {
+			// From file browser
+			path = browserPath
+			name = result.LaunchName()
+		} else if project := result.SelectedProject(); project != nil {
+			// From project list
+			path = project.Path
+			name = result.LaunchName()
+			if name == "" {
+				name = project.Name
+			}
+		} else {
 			return nil
 		}
-		// Use custom name if provided, otherwise project name
-		name := result.LaunchName()
+
 		if name == "" {
-			name = project.Name
+			return nil
 		}
-		// Create session from project with name, cwd, and optional layout
-		return c.Attach(name, project.Path, result.LaunchLayout())
+
+		// Create session with name, cwd, and optional layout
+		return c.Attach(name, path, result.LaunchLayout())
 	case "kill":
 		session := result.SelectedSession()
 		if session == "" {

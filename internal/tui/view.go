@@ -199,9 +199,9 @@ func (m Model) viewHelpBar() string {
 	}
 	// Show 'l' option when a project is selected
 	if m.SelectedProject() != nil {
-		return helpStyle.Render("[enter] create  [l] launch options  [d] hide  [/] filter  [?] help  [q] quit")
+		return helpStyle.Render("[enter] create  [l] options  [z] browse  [d] hide  [?] help  [q] quit")
 	}
-	return helpStyle.Render("[enter] attach  [d] delete  [r] rename  [/] filter  [?] help  [q] quit")
+	return helpStyle.Render("[enter] attach  [z] browse  [d] delete  [r] rename  [?] help  [q] quit")
 }
 
 func (m Model) viewHelp() string {
@@ -213,6 +213,7 @@ func (m Model) viewHelp() string {
     ↓/j       Move down
     enter     Attach/create session
     l         Launch with options (projects)
+    z         Browse filesystem
     d         Delete session / hide project
     r         Rename session
     R         Refresh list
