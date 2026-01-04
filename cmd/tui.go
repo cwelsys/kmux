@@ -10,13 +10,18 @@ import (
 )
 
 func runTUI() error {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
+
 	c := client.New(config.SocketPath())
 
 	if err := c.EnsureRunning(); err != nil {
 		return fmt.Errorf("daemon: %w", err)
 	}
 
-	m := tui.New(c)
+	m := tui.New(c, cfg)
 	p := tea.NewProgram(m, tea.WithAltScreen())
 
 	finalModel, err := p.Run()
@@ -25,17 +30,36 @@ func runTUI() error {
 	}
 
 	result := finalModel.(tui.Model)
-	session := result.SelectedSession()
 	action := result.Action()
 
-	if session == "" || action == "" {
+	if action == "" {
 		return nil
 	}
 
 	switch action {
 	case "attach":
+		session := result.SelectedSession()
+		if session == "" {
+			return nil
+		}
 		return c.Attach(session, "", "")
+	case "create":
+		project := result.SelectedProject()
+		if project == nil {
+			return nil
+		}
+		// Use custom name if provided, otherwise project name
+		name := result.LaunchName()
+		if name == "" {
+			name = project.Name
+		}
+		// Create session from project with name, cwd, and optional layout
+		return c.Attach(name, project.Path, result.LaunchLayout())
 	case "kill":
+		session := result.SelectedSession()
+		if session == "" {
+			return nil
+		}
 		return c.Kill(session)
 	}
 

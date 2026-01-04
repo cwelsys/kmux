@@ -56,9 +56,13 @@ func (m Model) View() string {
 	title := titleStyle.Render("kmux")
 	helpBar := m.viewHelpBar()
 
-	// Confirmation overlay
+	// Confirmation overlays
 	if m.confirmKill {
 		content = m.viewConfirmKill(m.width, m.height)
+	} else if m.confirmIgnore {
+		content = m.viewConfirmIgnore(m.width, m.height)
+	} else if m.launchMode {
+		content = m.viewLaunchModal(m.width, m.height)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, title, content, helpBar)
@@ -67,28 +71,57 @@ func (m Model) View() string {
 func (m Model) viewSessionList(width, height int) string {
 	var b strings.Builder
 
-	b.WriteString(dimStyle.Render("Sessions") + "\n")
-	b.WriteString(dimStyle.Render(strings.Repeat("─", width-4)) + "\n")
+	filterActive := m.filterInput.Value() != ""
 
-	if len(m.sessions) == 0 {
-		b.WriteString(dimStyle.Render("  No sessions"))
-	}
+	if filterActive {
+		// Filtered view - show all matching items in ranked order
+		if len(m.items) == 0 {
+			b.WriteString(dimStyle.Render("  No matches") + "\n")
+		} else {
+			for i, item := range m.items {
+				line := m.renderItem(item, width)
+				if i == m.cursor {
+					b.WriteString(selectedItemStyle.Render("> "+line) + "\n")
+				} else {
+					b.WriteString(itemStyle.Render(line) + "\n")
+				}
+			}
+		}
+	} else {
+		// Normal view - show sections
+		itemIdx := 0
 
-	for i, s := range m.sessions {
-		indicator := savedIndicator.String()
-		if s.HasRunning {
-			indicator = runningIndicator.String()
+		// Sessions section
+		b.WriteString(sectionHeaderStyle.Render("Sessions") + "\n")
+
+		if len(m.sessions) == 0 {
+			b.WriteString(dimStyle.Render("  No sessions") + "\n")
+		} else {
+			for _, s := range m.sessions {
+				line := m.renderItem(s, width)
+				if itemIdx == m.cursor {
+					b.WriteString(selectedItemStyle.Render("> "+line) + "\n")
+				} else {
+					b.WriteString(itemStyle.Render(line) + "\n")
+				}
+				itemIdx++
+			}
 		}
 
-		name := fmt.Sprintf("%s %s", indicator, s.Name)
-		panes := fmt.Sprintf("(%d)", s.PaneCount)
+		// Projects section
+		if len(m.projects) > 0 {
+			b.WriteString("\n")
+			b.WriteString(sectionHeaderStyle.Render("Projects") + "\n")
 
-		line := fmt.Sprintf("%-*s %s", width-8, name, panes)
-
-		if i == m.cursor {
-			b.WriteString(selectedItemStyle.Render("> "+line) + "\n")
-		} else {
-			b.WriteString(itemStyle.Render(line) + "\n")
+			for _, p := range m.projects {
+				line := m.renderItem(p, width)
+				if itemIdx == m.cursor {
+					b.WriteString(selectedItemStyle.Render("> "+line) + "\n")
+				} else {
+					b.WriteString(itemStyle.Render(line) + "\n")
+				}
+				itemIdx++
+			}
 		}
 	}
 
@@ -96,35 +129,61 @@ func (m Model) viewSessionList(width, height int) string {
 	return style.Render(b.String())
 }
 
+func (m Model) renderItem(item Item, width int) string {
+	if item.Type == ItemSession {
+		indicator := savedIndicator.String()
+		if item.HasRunning {
+			indicator = runningIndicator.String()
+		}
+		name := fmt.Sprintf("%s %s", indicator, item.Name)
+		panes := fmt.Sprintf("(%d)", item.PaneCount)
+		return fmt.Sprintf("%-*s %s", width-8, name, panes)
+	}
+	// Project
+	indicator := projectIndicator.String()
+	name := fmt.Sprintf("%s %s", indicator, item.Name)
+	return fmt.Sprintf("%-*s", width-6, name)
+}
+
 func (m Model) viewPreview(width, height int) string {
 	var b strings.Builder
 
-	if len(m.sessions) == 0 || m.cursor >= len(m.sessions) {
-		b.WriteString(dimStyle.Render("No session selected"))
-	} else {
-		s := m.sessions[m.cursor]
-
-		b.WriteString(previewTitleStyle.Render(s.Name) + "\n\n")
+	item := m.SelectedItem()
+	if item == nil {
+		b.WriteString(dimStyle.Render("No item selected"))
+	} else if item.Type == ItemSession {
+		b.WriteString(previewTitleStyle.Render(item.Name) + "\n\n")
 
 		status := "saved"
-		if s.HasRunning {
+		if item.HasRunning {
 			status = "running"
 		}
 		b.WriteString(previewInfoStyle.Render(fmt.Sprintf("status: %s", status)) + "\n")
-		b.WriteString(previewInfoStyle.Render(fmt.Sprintf("panes:  %d", s.PaneCount)) + "\n")
+		b.WriteString(previewInfoStyle.Render(fmt.Sprintf("panes:  %d", item.PaneCount)) + "\n")
 
-		if s.CWD != "" {
+		if item.CWD != "" {
 			// Shorten home directory
-			cwd := s.CWD
+			cwd := item.CWD
 			if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(cwd, home) {
 				cwd = "~" + cwd[len(home):]
 			}
 			b.WriteString(previewInfoStyle.Render(fmt.Sprintf("cwd:    %s", cwd)) + "\n")
 		}
 
-		if s.LastSeen != "" && s.HasRunning {
-			b.WriteString(previewInfoStyle.Render(fmt.Sprintf("active: %s", s.LastSeen)) + "\n")
+		if item.LastSeen != "" && item.HasRunning {
+			b.WriteString(previewInfoStyle.Render(fmt.Sprintf("active: %s", item.LastSeen)) + "\n")
 		}
+	} else {
+		// Project
+		b.WriteString(previewTitleStyle.Render(item.Name) + "\n\n")
+
+		// Shorten home directory in path
+		path := item.Path
+		if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(path, home) {
+			path = "~" + path[len(home):]
+		}
+		b.WriteString(previewInfoStyle.Render(fmt.Sprintf("path: %s", path)) + "\n\n")
+		b.WriteString(dimStyle.Render("No session - press enter to create") + "\n")
 	}
 
 	style := borderStyle.Width(width).Height(height)
@@ -133,7 +192,14 @@ func (m Model) viewPreview(width, height int) string {
 
 func (m Model) viewHelpBar() string {
 	if m.filterMode {
-		return helpStyle.Render("Filter: " + m.filterInput.View())
+		return helpStyle.Render("/ " + m.filterInput.View() + "  [enter] keep  [esc] clear")
+	}
+	if filter := m.filterInput.Value(); filter != "" {
+		return helpStyle.Render(fmt.Sprintf("/%s  [/] edit  [esc] clear  [enter] attach  [?] help  [q] quit", filter))
+	}
+	// Show 'l' option when a project is selected
+	if m.SelectedProject() != nil {
+		return helpStyle.Render("[enter] create  [l] launch options  [d] hide  [/] filter  [?] help  [q] quit")
 	}
 	return helpStyle.Render("[enter] attach  [d] delete  [r] rename  [/] filter  [?] help  [q] quit")
 }
@@ -145,12 +211,14 @@ func (m Model) viewHelp() string {
   Navigation:
     ↑/k       Move up
     ↓/j       Move down
-    enter     Attach to session
-    d         Delete session
+    enter     Attach/create session
+    l         Launch with options (projects)
+    d         Delete session / hide project
     r         Rename session
-    /         Filter sessions
+    R         Refresh list
+    /         Filter (fuzzy search)
     ?         Toggle help
-    q/esc     Quit
+    q/esc     Quit (esc clears filter first)
 
   Press any key to close this help.
 `
@@ -163,4 +231,51 @@ func (m Model) viewConfirmKill(width, height int) string {
 	msg := fmt.Sprintf("Kill session '%s'?\n\n[y] yes  [n] no", name)
 	style := borderStyle.Width(40).Padding(1, 2)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, style.Render(msg))
+}
+
+func (m Model) viewConfirmIgnore(width, height int) string {
+	project := m.SelectedProject()
+	name := ""
+	if project != nil {
+		name = project.Name
+	}
+	msg := fmt.Sprintf("Hide project '%s'?\n\nThis adds it to your ignore list.\n\n[y] yes  [n] no", name)
+	style := borderStyle.Width(45).Padding(1, 2)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, style.Render(msg))
+}
+
+func (m Model) viewLaunchModal(width, height int) string {
+	var b strings.Builder
+
+	b.WriteString(previewTitleStyle.Render("Launch Options") + "\n\n")
+
+	// Layout section
+	b.WriteString(previewInfoStyle.Render("Layout:") + "\n")
+	for i, layout := range m.launchLayouts {
+		indicator := "○"
+		if i == m.launchCursor {
+			indicator = "●"
+		}
+		style := itemStyle
+		if i == m.launchCursor && !m.launchNameFocus {
+			style = selectedItemStyle
+		}
+		b.WriteString(style.Render(fmt.Sprintf("  %s %s", indicator, layout)) + "\n")
+	}
+
+	// Name section
+	b.WriteString("\n")
+	nameLabel := previewInfoStyle.Render("Name:")
+	if m.launchNameFocus {
+		nameLabel = selectedItemStyle.Render("Name:")
+	}
+	b.WriteString(nameLabel + "\n")
+	b.WriteString("  " + m.launchNameInput.View() + "\n")
+
+	// Help
+	b.WriteString("\n")
+	b.WriteString(dimStyle.Render("[↑/↓] select  [tab] switch  [enter] launch  [esc] cancel"))
+
+	style := borderStyle.Width(45).Padding(1, 2)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, style.Render(b.String()))
 }
