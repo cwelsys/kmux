@@ -340,6 +340,21 @@ func (s *Server) initState() {
 	// (We can't verify kitty windows at init - no socket yet)
 	// Polling will clean these up later
 
+	// Adopt orphan zmx sessions that follow our naming convention
+	// This handles daemon crashes or state loss - zmx is the source of truth
+	for _, zmxName := range zmxSessions {
+		if _, owned := s.state.ZmxOwnership[zmxName]; owned {
+			continue // already tracked
+		}
+		sessName := model.ParseZmxSessionName(zmxName)
+		if sessName == "" {
+			continue // not our naming convention, ignore
+		}
+		log.Printf("[init] adopting orphan zmx session %q -> session %q", zmxName, sessName)
+		s.state.ZmxOwnership[zmxName] = sessName
+		sessionPanes[sessName]++
+	}
+
 	// Create session entries from ownership
 	for name, panes := range sessionPanes {
 		s.state.Sessions[name] = &SessionState{
@@ -355,21 +370,6 @@ func (s *Server) initState() {
 	s.state.LastPoll = time.Now()
 
 	log.Printf("[init] initialized with %d sessions from persisted state", len(s.state.Sessions))
-}
-
-// countZmxPanes counts zmx sessions with the given prefix
-func countZmxPanes(zmxSessions []string, sessionName string) int {
-	prefix := sessionName + "."
-	count := 0
-	for _, z := range zmxSessions {
-		if len(z) > len(prefix) && z[:len(prefix)] == prefix {
-			count++
-		}
-	}
-	if count == 0 {
-		return 1
-	}
-	return count
 }
 
 // layoutToSession converts a layout template to a session.
@@ -1266,12 +1266,18 @@ func (s *Server) pollState() {
 		}
 	}
 
-	// Check for discrepancies: unknown zmx sessions running
-	for _, z := range zmxSessions {
-		if _, owned := s.state.ZmxOwnership[z]; !owned {
-			// This is a zmx session we don't know about - log it but don't adopt
-			log.Printf("[poll] DISCREPANCY: unknown zmx session %q running (not in ownership map)", z)
+	// Adopt orphan zmx sessions that follow our naming convention
+	for _, zmxName := range zmxSessions {
+		if _, owned := s.state.ZmxOwnership[zmxName]; owned {
+			continue // already tracked
 		}
+		sessName := model.ParseZmxSessionName(zmxName)
+		if sessName == "" {
+			continue // not our naming convention, ignore
+		}
+		log.Printf("[poll] adopting orphan zmx session %q -> session %q", zmxName, sessName)
+		s.state.ZmxOwnership[zmxName] = sessName
+		stateChanged = true
 	}
 
 	// Clean up mappings for windows that no longer exist
@@ -1303,6 +1309,22 @@ func (s *Server) pollState() {
 	for zmxName, sessName := range s.state.ZmxOwnership {
 		if zmxSet[zmxName] {
 			zmxPanesBySession[sessName]++
+		}
+	}
+
+	// Create session entries for sessions in ownership but not in Sessions
+	// (handles adopted orphans)
+	for sessName, panes := range zmxPanesBySession {
+		if _, exists := s.state.Sessions[sessName]; !exists {
+			log.Printf("[poll] creating session entry for %q (%d panes)", sessName, panes)
+			s.state.Sessions[sessName] = &SessionState{
+				Name:     sessName,
+				Status:   "detached",
+				Panes:    panes,
+				ZmxAlive: true,
+				LastSeen: time.Now(),
+			}
+			stateChanged = true
 		}
 	}
 

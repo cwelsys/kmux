@@ -59,7 +59,7 @@ func TestClient_Sessions(t *testing.T) {
 	// Create a saved session
 	st := store.New(dataDir)
 	sess := &model.Session{
-		Name: "testsession",
+		Name: "testsession_client",
 		Tabs: []model.Tab{{Windows: []model.Window{{CWD: "/tmp"}}}},
 	}
 	st.SaveSession(sess)
@@ -75,11 +75,16 @@ func TestClient_Sessions(t *testing.T) {
 		t.Fatalf("Sessions: %v", err)
 	}
 
-	if len(sessions) != 1 {
-		t.Fatalf("got %d sessions, want 1", len(sessions))
+	// Find our test session in the list (may include real zmx sessions)
+	var found bool
+	for _, s := range sessions {
+		if s.Name == "testsession_client" {
+			found = true
+			break
+		}
 	}
-	if sessions[0].Name != "testsession" {
-		t.Errorf("got name %q, want testsession", sessions[0].Name)
+	if !found {
+		t.Error("restore point 'testsession_client' should appear with includeRestorePoints=true")
 	}
 }
 

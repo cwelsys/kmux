@@ -53,6 +53,36 @@ func TestZmxSessionName(t *testing.T) {
 	}
 }
 
+func TestParseZmxSessionName(t *testing.T) {
+	tests := []struct {
+		zmxName  string
+		expected string
+	}{
+		// Valid kmux names
+		{"myproject.0.0", "myproject"},
+		{"myproject.0.1", "myproject"},
+		{"myproject.1.0", "myproject"},
+		{"work.2.5", "work"},
+		// Session names with dots
+		{"my.dotted.project.0.0", "my.dotted.project"},
+		{"a.b.c.1.2", "a.b.c"},
+		// Invalid - not our naming convention
+		{"standalone", ""},          // no dots
+		{"foo.bar", ""},             // only one dot
+		{"foo.bar.baz", ""},         // not numeric suffix
+		{"foo.0.bar", ""},           // second part not numeric
+		{".0.0", ""},                // empty session name
+		{"", ""},                    // empty string
+	}
+
+	for _, tt := range tests {
+		got := ParseZmxSessionName(tt.zmxName)
+		if got != tt.expected {
+			t.Errorf("ParseZmxSessionName(%q) = %q, want %q", tt.zmxName, got, tt.expected)
+		}
+	}
+}
+
 func TestSplitNode_IsLeaf(t *testing.T) {
 	idx := 0
 	leaf := &SplitNode{WindowIdx: &idx}

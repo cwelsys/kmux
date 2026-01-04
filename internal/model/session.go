@@ -51,3 +51,39 @@ func (n *SplitNode) IsLeaf() bool {
 func (s *Session) ZmxSessionName(tabIdx, winIdx int) string {
 	return s.Name + "." + strconv.Itoa(tabIdx) + "." + strconv.Itoa(winIdx)
 }
+
+// ParseZmxSessionName extracts the kmux session name from a zmx session name.
+// Format: {session}.{tabIdx}.{winIdx} where session may contain dots.
+// Returns empty string if the name doesn't match kmux's naming convention.
+func ParseZmxSessionName(zmxName string) string {
+	// Find last two dots - the parts after them should be integers
+	lastDot := -1
+	secondLastDot := -1
+	for i := len(zmxName) - 1; i >= 0; i-- {
+		if zmxName[i] == '.' {
+			if lastDot == -1 {
+				lastDot = i
+			} else {
+				secondLastDot = i
+				break
+			}
+		}
+	}
+
+	// Need at least {name}.{tab}.{win}
+	if secondLastDot <= 0 || lastDot <= secondLastDot+1 {
+		return ""
+	}
+
+	// Verify the suffix parts are numeric (our naming convention)
+	tabPart := zmxName[secondLastDot+1 : lastDot]
+	winPart := zmxName[lastDot+1:]
+	if _, err := strconv.Atoi(tabPart); err != nil {
+		return ""
+	}
+	if _, err := strconv.Atoi(winPart); err != nil {
+		return ""
+	}
+
+	return zmxName[:secondLastDot]
+}
