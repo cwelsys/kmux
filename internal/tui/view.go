@@ -43,7 +43,7 @@ func (m Model) View() string {
 	// Calculate pane widths
 	listWidth := m.width/2 - 2
 	previewWidth := m.width - listWidth - 4
-	contentHeight := m.height - 4 // account for borders and help bar
+	contentHeight := m.height - 6 // account for borders, title, and help bar padding
 
 	// Build panes
 	listPane := m.viewSessionList(listWidth, contentHeight)

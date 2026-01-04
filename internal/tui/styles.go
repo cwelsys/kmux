@@ -69,7 +69,7 @@ var (
 	// Help bar
 	helpStyle = lipgloss.NewStyle().
 			Foreground(overlay1).
-			Padding(0, 1)
+			Padding(1, 2)
 
 	// Preview pane
 	previewTitleStyle = lipgloss.NewStyle().
