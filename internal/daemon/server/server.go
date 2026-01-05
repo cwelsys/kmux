@@ -1160,6 +1160,8 @@ func (s *Server) pollState() {
 			log.Printf("[poll] DISCREPANCY: zmx session %q (owned by %q) no longer exists - removing from ownership",
 				zmxName, sessName)
 			delete(s.state.ZmxOwnership, zmxName)
+			// Clean up any orphaned zmx attach processes for the dead session
+			s.zmx.KillOrphans(zmxName)
 			stateChanged = true
 		}
 	}
