@@ -7,7 +7,7 @@ import (
 )
 
 func TestDeriveSession(t *testing.T) {
-	// Simulated kitty state
+	// Simulated kitty state with user_vars (source of truth)
 	state := kitty.KittyState{
 		{
 			ID:       1,
@@ -23,15 +23,15 @@ func TestDeriveSession(t *testing.T) {
 							ID:       1,
 							IsActive: true,
 							CWD:      "/home/user/project",
-							Env:      map[string]string{"KMUX_SESSION": "myproject"},
+							UserVars: map[string]string{"kmux_session": "myproject", "kmux_zmx": "myproject.0.0"},
 							ForegroundProcesses: []kitty.ForegroundProcess{
 								{Cmdline: []string{"nvim", "."}},
 							},
 						},
 						{
-							ID:  2,
-							CWD: "/home/user/project",
-							Env: map[string]string{"KMUX_SESSION": "myproject"},
+							ID:       2,
+							CWD:      "/home/user/project",
+							UserVars: map[string]string{"kmux_session": "myproject", "kmux_zmx": "myproject.0.1"},
 							ForegroundProcesses: []kitty.ForegroundProcess{
 								{Cmdline: []string{"/bin/zsh"}},
 							},
@@ -42,12 +42,7 @@ func TestDeriveSession(t *testing.T) {
 		},
 	}
 
-	// Test doesn't verify zmx names, so pass empty maps
-	windowSessions := map[int]string{
-		1: "myproject",
-		2: "myproject",
-	}
-	session := DeriveSession("myproject", state, map[int]string{}, windowSessions)
+	session := DeriveSession("myproject", state)
 
 	if session.Name != "myproject" {
 		t.Errorf("Name = %s, want myproject", session.Name)
@@ -92,20 +87,15 @@ func TestDeriveSession_WithSplits(t *testing.T) {
 						},
 					},
 					Windows: []kitty.Window{
-						{ID: 42, CWD: "/project", Env: map[string]string{"KMUX_SESSION": "test"}},
-						{ID: 43, CWD: "/project/src", Env: map[string]string{"KMUX_SESSION": "test"}},
+						{ID: 42, CWD: "/project", UserVars: map[string]string{"kmux_session": "test", "kmux_zmx": "test.0.0"}},
+						{ID: 43, CWD: "/project/src", UserVars: map[string]string{"kmux_session": "test", "kmux_zmx": "test.0.1"}},
 					},
 				},
 			},
 		},
 	}
 
-	// Test doesn't verify zmx names, so pass empty maps
-	windowSessions := map[int]string{
-		42: "test",
-		43: "test",
-	}
-	session := DeriveSession("test", state, map[int]string{}, windowSessions)
+	session := DeriveSession("test", state)
 
 	if len(session.Tabs) != 1 {
 		t.Fatalf("expected 1 tab, got %d", len(session.Tabs))

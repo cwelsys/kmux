@@ -34,7 +34,7 @@ type Response struct {
 // SessionInfo is returned by the sessions method.
 type SessionInfo struct {
 	Name           string `json:"name"`
-	Status         string `json:"status"` // "attached", "detached", "saved"
+	Status         string `json:"status"` // "active", "detached", "saved"
 	Panes          int    `json:"panes"`
 	IsRestorePoint bool   `json:"is_restore_point,omitempty"`
 	CWD            string `json:"cwd,omitempty"`            // working directory of first pane

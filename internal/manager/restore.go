@@ -24,43 +24,163 @@ type WindowCreate struct {
 	ZmxName       string
 }
 
-// RestoreCallback is called for each window to be created.
-// launchType is "tab" for first window, "hsplit" or "vsplit" for splits.
-type RestoreCallback func(win model.Window, launchType string)
+// SplitInfo holds split type and bias for window creation.
+type SplitInfo struct {
+	Type string // "tab", "hsplit", "vsplit"
+	Bias int    // 0-100, percentage for new window (0 = default/equal)
+}
 
-// traverseForRestore does DFS traversal of split tree, calling callback for each leaf.
-// parentSplit is the split direction from parent (empty for first window).
-func traverseForRestore(node *model.SplitNode, parentSplit string, windows []model.Window, callback RestoreCallback) {
-	if node == nil {
-		return
+// windowCreator encapsulates window creation state during restore.
+type windowCreator struct {
+	k          *kitty.Client
+	session    *model.Session
+	tabIdx     int
+	tab        model.Tab
+	windowIdx  int
+	creations  []WindowCreate
+	firstWinID int
+}
+
+// createWindow creates a single kitty window and records the creation.
+// Returns the kitty window ID of the created window.
+func (wc *windowCreator) createWindow(win model.Window, split SplitInfo) (int, error) {
+	// Use saved ZmxName if available, otherwise generate
+	zmxName := win.ZmxName
+	if zmxName == "" {
+		zmxName = wc.session.ZmxSessionName(wc.tabIdx, wc.windowIdx)
+	}
+	// Pass session name for cleanup callback
+	zmxCmd := zmx.AttachCmd(zmxName, wc.session.Name, win.Command)
+
+	// Convert split type to kitty location
+	location := ""
+	launchType := split.Type
+	if launchType == "hsplit" || launchType == "vsplit" {
+		launchType = "window"
+		location = split.Type
 	}
 
+	opts := kitty.LaunchOpts{
+		Type:     launchType,
+		CWD:      win.CWD,
+		Title:    wc.tab.Title,
+		Location: location,
+		Cmd:      zmxCmd,
+		Env:      nil,
+		Vars: map[string]string{
+			"kmux_zmx":     zmxName,
+			"kmux_session": wc.session.Name,
+		},
+		Bias: split.Bias,
+	}
+
+	id, err := wc.k.Launch(opts)
+	if err != nil {
+		return 0, err
+	}
+
+	// Record creation for mapping
+	wc.creations = append(wc.creations, WindowCreate{
+		KittyWindowID: id,
+		ZmxName:       zmxName,
+	})
+
+	if wc.windowIdx == 0 {
+		wc.firstWinID = id
+	}
+	wc.windowIdx++
+
+	wc.session.ZmxSessions = append(wc.session.ZmxSessions, zmxName)
+	return id, nil
+}
+
+// restoreSpine creates the "spine" of a subtree - following first-child path to a leaf.
+// Returns the window ID of the created leaf.
+func (wc *windowCreator) restoreSpine(node *model.SplitNode, parentSplit SplitInfo, windows []model.Window) (int, error) {
+	if node == nil {
+		return 0, nil
+	}
+
+	// Leaf node: create the window
 	if node.IsLeaf() {
 		idx := *node.WindowIdx
 		if idx < 0 || idx >= len(windows) {
-			return // silently skip invalid indices
+			return 0, nil
 		}
 		win := windows[idx]
-		launchType := parentSplit
-		if launchType == "" {
-			launchType = "tab" // first window creates the tab
+		split := parentSplit
+		if split.Type == "" {
+			split.Type = "tab"
 		}
-		callback(win, launchType)
-		return
+		return wc.createWindow(win, split)
+	}
+
+	// Internal node: only follow first child path
+	return wc.restoreSpine(node.Children[0], parentSplit, windows)
+}
+
+// fillSecondChildren creates all second children in a subtree.
+// spineWinID is the window ID of the spine (first-child path) leaf in this subtree.
+func (wc *windowCreator) fillSecondChildren(node *model.SplitNode, spineWinID int, windows []model.Window) error {
+	if node == nil || node.IsLeaf() {
+		return nil
 	}
 
 	// Determine split type for second child
-	// In kitty layout_state: horizontal=true means left/right (vsplit), false means top/bottom (hsplit)
 	splitType := "vsplit"
 	if !node.Horizontal {
 		splitType = "hsplit"
 	}
 
-	// First child inherits parent's split type
-	traverseForRestore(node.Children[0], parentSplit, windows, callback)
+	// Calculate bias for second child
+	bias := 0
+	if node.Bias > 0 && node.Bias < 1 {
+		bias = int((1 - node.Bias) * 100)
+	}
 
-	// Second child uses this node's split type
-	traverseForRestore(node.Children[1], splitType, windows, callback)
+	// Focus the spine window and create second child's spine
+	if err := wc.k.FocusWindow(spineWinID); err != nil {
+		return err
+	}
+
+	secondSpineID, err := wc.restoreSpine(node.Children[1], SplitInfo{Type: splitType, Bias: bias}, windows)
+	if err != nil {
+		return err
+	}
+
+	// Recursively fill second children in both subtrees
+	// First child's spine is still spineWinID
+	if err := wc.fillSecondChildren(node.Children[0], spineWinID, windows); err != nil {
+		return err
+	}
+	// Second child's spine is secondSpineID
+	if err := wc.fillSecondChildren(node.Children[1], secondSpineID, windows); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// restoreSubtree restores a complete subtree using two-pass algorithm:
+// 1. Create spines (first-child paths) - this establishes the split structure
+// 2. Fill in second children
+func (wc *windowCreator) restoreSubtree(node *model.SplitNode, parentSplit SplitInfo, windows []model.Window) (int, error) {
+	if node == nil {
+		return 0, nil
+	}
+
+	// Pass 1: Create the spine of this subtree
+	spineWinID, err := wc.restoreSpine(node, parentSplit, windows)
+	if err != nil {
+		return 0, err
+	}
+
+	// Pass 2: Fill in all second children
+	if err := wc.fillSecondChildren(node, spineWinID, windows); err != nil {
+		return 0, err
+	}
+
+	return spineWinID, nil
 }
 
 // RestoreTab creates kitty windows for a tab with split layout.
@@ -71,56 +191,11 @@ func RestoreTab(
 	tabIdx int,
 	tab model.Tab,
 ) ([]WindowCreate, int, error) {
-	var creations []WindowCreate
-	var firstWindowID int
-	var lastWindowID int
-	windowIdx := 0
-
-	createWindow := func(win model.Window, launchType string) error {
-		// Use saved ZmxName if available, otherwise generate
-		zmxName := win.ZmxName
-		if zmxName == "" {
-			zmxName = session.ZmxSessionName(tabIdx, windowIdx)
-		}
-		// Pass session name for cleanup callback
-		zmxCmd := zmx.AttachCmd(zmxName, session.Name, win.Command)
-
-		// Convert launchType to kitty location
-		location := ""
-		launchTypeKitty := launchType
-		if launchType == "hsplit" || launchType == "vsplit" {
-			launchTypeKitty = "window"
-			location = launchType
-		}
-
-		opts := kitty.LaunchOpts{
-			Type:     launchTypeKitty,
-			CWD:      win.CWD,
-			Title:    tab.Title,
-			Location: location,
-			Cmd:      zmxCmd,
-			Env:      nil,
-		}
-
-		id, err := k.Launch(opts)
-		if err != nil {
-			return err
-		}
-
-		// Record creation for mapping
-		creations = append(creations, WindowCreate{
-			KittyWindowID: id,
-			ZmxName:       zmxName,
-		})
-
-		if windowIdx == 0 {
-			firstWindowID = id
-		}
-		lastWindowID = id
-		windowIdx++
-
-		session.ZmxSessions = append(session.ZmxSessions, zmxName)
-		return nil
+	wc := &windowCreator{
+		k:       k,
+		session: session,
+		tabIdx:  tabIdx,
+		tab:     tab,
 	}
 
 	// Handle simple kitty layouts (tall, fat, grid, horizontal, vertical)
@@ -129,7 +204,7 @@ func RestoreTab(
 		for i, win := range tab.Windows {
 			if i == 0 {
 				// Create first window as a new tab
-				if err := createWindow(win, "tab"); err != nil {
+				if _, err := wc.createWindow(win, SplitInfo{Type: "tab"}); err != nil {
 					return nil, 0, err
 				}
 				// Set layout before creating additional windows
@@ -140,39 +215,30 @@ func RestoreTab(
 				}
 			} else {
 				// Subsequent windows - kitty places according to layout
-				if err := createWindow(win, "window"); err != nil {
+				if _, err := wc.createWindow(win, SplitInfo{Type: "window"}); err != nil {
 					return nil, 0, err
 				}
 			}
 		}
-		return creations, firstWindowID, nil
+		return wc.creations, wc.firstWinID, nil
 	}
 
 	// Handle single window (no splits)
 	if tab.SplitRoot == nil || len(tab.Windows) <= 1 {
 		for _, win := range tab.Windows {
-			if err := createWindow(win, "tab"); err != nil {
+			if _, err := wc.createWindow(win, SplitInfo{Type: "tab"}); err != nil {
 				return nil, 0, err
 			}
 		}
-		return creations, firstWindowID, nil
+		return wc.creations, wc.firstWinID, nil
 	}
 
-	// Traverse split tree
-	var restoreErr error
-	traverseForRestore(tab.SplitRoot, "", tab.Windows, func(win model.Window, launchType string) {
-		if restoreErr != nil {
-			return
-		}
-		// Focus last window before creating split
-		if launchType != "tab" && lastWindowID > 0 {
-			if err := k.FocusWindow(lastWindowID); err != nil {
-				restoreErr = err
-				return
-			}
-		}
-		restoreErr = createWindow(win, launchType)
-	})
+	// Restore split tree - this properly tracks subtree representatives
+	// to ensure splits happen from the correct windows
+	_, err := wc.restoreSubtree(tab.SplitRoot, SplitInfo{}, tab.Windows)
+	if err != nil {
+		return nil, 0, err
+	}
 
-	return creations, firstWindowID, restoreErr
+	return wc.creations, wc.firstWinID, nil
 }

@@ -280,3 +280,17 @@ func (c *Client) NotifyWindowClosed(windowID int, zmxName, session string) error
 	_, err = c.call(req)
 	return err
 }
+
+// CloseFocused closes the currently focused window.
+// The daemon determines the focused window from kitty state - no env vars needed.
+func (c *Client) CloseFocused() error {
+	_, err := c.call(protocol.NewRequest(protocol.MethodCloseFocused, c.kittySocket))
+	return err
+}
+
+// CloseTab closes the currently focused tab.
+// The daemon determines the focused tab from kitty state - no env vars needed.
+func (c *Client) CloseTab() error {
+	_, err := c.call(protocol.NewRequest(protocol.MethodCloseTab, c.kittySocket))
+	return err
+}

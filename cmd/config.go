@@ -51,6 +51,13 @@ auto_save_interval = 900
 
 [kitty]
 # socket = "/tmp/mykitty"
+
+[projects]
+# Directories to scan for projects (shown in TUI)
+# directories = ["~/src", "~/projects"]
+# max_depth = 2
+# git_only = true  # only show git repos (set false to show all directories)
+# ignore = ["node_modules", "vendor", "~/src/old-stuff"]
 `
 		if err := os.WriteFile(configPath, []byte(defaultConfig), 0644); err != nil {
 			return fmt.Errorf("write config: %w", err)

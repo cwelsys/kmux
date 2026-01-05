@@ -71,9 +71,16 @@ func (c *Client) Launch(opts LaunchOpts) (int, error) {
 	if opts.Location != "" {
 		args = append(args, "--location", opts.Location)
 	}
+	if opts.Bias > 0 {
+		args = append(args, "--bias", fmt.Sprintf("%d", opts.Bias))
+	}
 	// Add environment variables
 	for key, val := range opts.Env {
 		args = append(args, "--env", key+"="+val)
+	}
+	// Add user variables (stored on the window, queryable via kitty @ ls)
+	for key, val := range opts.Vars {
+		args = append(args, "--var", key+"="+val)
 	}
 	if len(opts.Cmd) > 0 {
 		args = append(args, opts.Cmd...)
@@ -105,6 +112,8 @@ type LaunchOpts struct {
 	Location string            // "first", "after", "before", "neighbor", "last", "vsplit", "hsplit"
 	Cmd      []string
 	Env      map[string]string // Environment variables to pass to launched window
+	Vars     map[string]string // User variables to set on the window (kitty --var)
+	Bias     int               // 0-100 percentage for split bias (0 means default/equal)
 }
 
 // FocusWindow focuses a window by ID.

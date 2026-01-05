@@ -129,6 +129,7 @@ type Window struct {
 	PID                 int                 `json:"pid"`
 	Cmdline             []string            `json:"cmdline"`
 	Env                 map[string]string   `json:"env"`
+	UserVars            map[string]string   `json:"user_vars"`
 	ForegroundProcesses []ForegroundProcess `json:"foreground_processes"`
 	Neighbors           map[string][]int    `json:"neighbors"`
 }

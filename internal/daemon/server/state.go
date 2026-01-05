@@ -10,15 +10,9 @@ import (
 )
 
 // PersistedState is the daemon state that survives restarts.
-// This is the AUTHORITATIVE source of truth for window/session mappings.
+// Only ZmxOwnership is persisted - window/session info comes from kitty user_vars.
 type PersistedState struct {
-	// Mappings: kitty_window_id -> zmx_name
-	Mappings map[int]string `json:"mappings"`
-
-	// WindowSessions: kitty_window_id -> session_name
-	WindowSessions map[int]string `json:"window_sessions"`
-
-	// ZmxOwnership: zmx_name -> session_name (for rename support)
+	// ZmxOwnership: zmx_name -> session_name (for detached session tracking)
 	ZmxOwnership map[string]string `json:"zmx_ownership"`
 
 	// LastSaved: when this state was last persisted
@@ -30,24 +24,15 @@ func (s *Server) statePath() string {
 	return filepath.Join(s.dataDir, "daemon-state.json")
 }
 
-// saveState persists the daemon's authoritative mappings to disk.
-// Called after every mutation (attach, detach, split, close, rename).
+// saveState persists the daemon's zmx ownership to disk.
 func (s *Server) saveState() error {
 	s.mu.Lock()
 	state := PersistedState{
-		Mappings:       make(map[int]string),
-		WindowSessions: make(map[int]string),
-		ZmxOwnership:   make(map[string]string),
-		LastSaved:      time.Now(),
+		ZmxOwnership: make(map[string]string),
+		LastSaved:    time.Now(),
 	}
 
-	// Copy maps to avoid holding lock during I/O
-	for k, v := range s.state.Mappings {
-		state.Mappings[k] = v
-	}
-	for k, v := range s.state.WindowSessions {
-		state.WindowSessions[k] = v
-	}
+	// Copy map to avoid holding lock during I/O
 	for k, v := range s.state.ZmxOwnership {
 		state.ZmxOwnership[k] = v
 	}
@@ -73,8 +58,7 @@ func (s *Server) saveState() error {
 		return fmt.Errorf("rename state file: %w", err)
 	}
 
-	log.Printf("[state] saved daemon state: %d mappings, %d window-sessions, %d zmx-ownership",
-		len(state.Mappings), len(state.WindowSessions), len(state.ZmxOwnership))
+	log.Printf("[state] saved daemon state: %d zmx-ownership", len(state.ZmxOwnership))
 
 	return nil
 }
@@ -96,13 +80,7 @@ func (s *Server) loadState() (*PersistedState, error) {
 		return nil, fmt.Errorf("unmarshal state: %w", err)
 	}
 
-	// Initialize nil maps
-	if state.Mappings == nil {
-		state.Mappings = make(map[int]string)
-	}
-	if state.WindowSessions == nil {
-		state.WindowSessions = make(map[int]string)
-	}
+	// Initialize nil map
 	if state.ZmxOwnership == nil {
 		state.ZmxOwnership = make(map[string]string)
 	}
