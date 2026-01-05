@@ -46,7 +46,6 @@ var configInitCmd = &cobra.Command{
 
 		// Write default config
 		defaultConfig := `[daemon]
-watch_interval = 5
 auto_save_interval = 900
 
 [kitty]

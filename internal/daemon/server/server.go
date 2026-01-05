@@ -89,8 +89,7 @@ func New(socketPath, dataDir string) *Server {
 func (s *Server) Start() error {
 	// Log config on startup
 	log.Printf("kmux daemon starting")
-	log.Printf("  config: watch_interval=%ds, auto_save_interval=%ds",
-		s.cfg.Daemon.WatchInterval, s.cfg.Daemon.AutoSaveInterval)
+	log.Printf("  config: auto_save_interval=%ds", s.cfg.Daemon.AutoSaveInterval)
 	if s.cfg.Kitty.Socket != "" {
 		log.Printf("  config: kitty_socket=%s", s.cfg.Kitty.Socket)
 	}
@@ -117,7 +116,7 @@ func (s *Server) Start() error {
 	s.listener = listener
 	s.mu.Unlock()
 
-	go s.runPollingLoop()
+	go s.runAutoSaveLoop()
 
 	// Accept loop
 	for {
@@ -392,7 +391,10 @@ func layoutToSession(layout *config.Layout, name, cwd string) *model.Session {
 }
 
 func (s *Server) handleSessions(k *kitty.Client, params protocol.SessionsParams) protocol.Response {
-	// Build session list from daemon's authoritative state
+	// Refresh state from zmx/kitty before returning session list
+	s.reconcileState()
+
+	// Build session list from daemon's state
 	s.mu.Lock()
 	var sessions []protocol.SessionInfo
 	for name, sess := range s.state.Sessions {
@@ -1092,10 +1094,8 @@ func (s *Server) handleCloseTab(k *kitty.Client) protocol.Response {
 	})
 }
 
-func (s *Server) runPollingLoop() {
-	pollTicker := time.NewTicker(time.Duration(s.cfg.Daemon.WatchInterval) * time.Second)
+func (s *Server) runAutoSaveLoop() {
 	saveTicker := time.NewTicker(time.Duration(s.cfg.Daemon.AutoSaveInterval) * time.Second)
-	defer pollTicker.Stop()
 	defer saveTicker.Stop()
 
 	for {
@@ -1103,16 +1103,16 @@ func (s *Server) runPollingLoop() {
 		case <-s.done:
 			s.autoSaveAll()
 			return
-		case <-pollTicker.C:
-			s.pollState()
 		case <-saveTicker.C:
 			s.autoSaveAll()
 		}
 	}
 }
 
-func (s *Server) pollState() {
-	// Poll zmx for verification
+// reconcileState refreshes daemon state from zmx and kitty.
+// Called on-demand (during commands) rather than polling.
+func (s *Server) reconcileState() {
+	// Query zmx for current sessions
 	zmxSessions, _ := s.zmx.List()
 	zmxSet := make(map[string]bool)
 	for _, z := range zmxSessions {
@@ -1157,7 +1157,7 @@ func (s *Server) pollState() {
 	// Check for discrepancies: zmx sessions we own that are gone
 	for zmxName, sessName := range s.state.ZmxOwnership {
 		if !zmxSet[zmxName] {
-			log.Printf("[poll] DISCREPANCY: zmx session %q (owned by %q) no longer exists - removing from ownership",
+			log.Printf("[reconcile] DISCREPANCY: zmx session %q (owned by %q) no longer exists - removing from ownership",
 				zmxName, sessName)
 			delete(s.state.ZmxOwnership, zmxName)
 			// Clean up any orphaned zmx attach processes for the dead session
@@ -1175,7 +1175,7 @@ func (s *Server) pollState() {
 		if sessName == "" {
 			continue // not our naming convention, ignore
 		}
-		log.Printf("[poll] adopting orphan zmx session %q -> session %q", zmxName, sessName)
+		log.Printf("[reconcile] adopting orphan zmx session %q -> session %q", zmxName, sessName)
 		s.state.ZmxOwnership[zmxName] = sessName
 		stateChanged = true
 	}
@@ -1204,7 +1204,7 @@ func (s *Server) pollState() {
 	// (handles adopted orphans)
 	for sessName, panes := range zmxPanesBySession {
 		if _, exists := s.state.Sessions[sessName]; !exists {
-			log.Printf("[poll] creating session entry for %q (%d panes)", sessName, panes)
+			log.Printf("[reconcile] creating session entry for %q (%d panes)", sessName, panes)
 			s.state.Sessions[sessName] = &SessionState{
 				Name:     sessName,
 				Status:   "detached",
@@ -1237,7 +1237,7 @@ func (s *Server) pollState() {
 			sess.LastSeen = time.Now()
 		} else {
 			// No windows, no zmx - session is gone
-			log.Printf("[poll] session %s: removed (no windows, no zmx)", name)
+			log.Printf("[reconcile] session %s: removed (no windows, no zmx)", name)
 			delete(s.state.Sessions, name)
 			stateChanged = true
 			continue
@@ -1245,7 +1245,7 @@ func (s *Server) pollState() {
 
 		// Log state changes
 		if oldStatus != sess.Status || oldPanes != sess.Panes {
-			log.Printf("[poll] session %s: %s/%d -> %s/%d",
+			log.Printf("[reconcile] session %s: %s/%d -> %s/%d",
 				name, oldStatus, oldPanes, sess.Status, sess.Panes)
 		}
 	}
@@ -1255,12 +1255,15 @@ func (s *Server) pollState() {
 	// Persist state if changes were detected
 	if stateChanged {
 		if err := s.saveState(); err != nil {
-			log.Printf("[poll] WARNING: failed to persist state after cleanup: %v", err)
+			log.Printf("[reconcile] WARNING: failed to persist state after cleanup: %v", err)
 		}
 	}
 }
 
 func (s *Server) autoSaveAll() {
+	// Refresh state from zmx/kitty before saving
+	s.reconcileState()
+
 	s.mu.Lock()
 	kittyClient := s.kitty
 	kittyState := s.state.KittyState

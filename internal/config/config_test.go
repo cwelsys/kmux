@@ -35,9 +35,6 @@ func TestSocketPath_Override(t *testing.T) {
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.Daemon.WatchInterval != 5 {
-		t.Errorf("WatchInterval = %d, want 5", cfg.Daemon.WatchInterval)
-	}
 	if cfg.Daemon.AutoSaveInterval != 900 {
 		t.Errorf("AutoSaveInterval = %d, want 900", cfg.Daemon.AutoSaveInterval)
 	}
@@ -85,7 +82,6 @@ func TestLoadConfig(t *testing.T) {
 	configPath := filepath.Join(dir, "config.toml")
 	content := `
 [daemon]
-watch_interval = 10
 auto_save_interval = 600
 
 [kitty]
@@ -101,9 +97,6 @@ socket = "/tmp/custom-kitty"
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	if cfg.Daemon.WatchInterval != 10 {
-		t.Errorf("WatchInterval = %d, want 10", cfg.Daemon.WatchInterval)
-	}
 	if cfg.Daemon.AutoSaveInterval != 600 {
 		t.Errorf("AutoSaveInterval = %d, want 600", cfg.Daemon.AutoSaveInterval)
 	}
@@ -124,9 +117,6 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 
 	// Should use defaults
-	if cfg.Daemon.WatchInterval != 5 {
-		t.Errorf("WatchInterval = %d, want 5", cfg.Daemon.WatchInterval)
-	}
 	if cfg.Daemon.AutoSaveInterval != 900 {
 		t.Errorf("AutoSaveInterval = %d, want 900", cfg.Daemon.AutoSaveInterval)
 	}
@@ -138,7 +128,7 @@ func TestLoadConfigPartial(t *testing.T) {
 	configPath := filepath.Join(dir, "config.toml")
 	content := `
 [daemon]
-watch_interval = 10
+auto_save_interval = 300
 `
 	os.WriteFile(configPath, []byte(content), 0644)
 
@@ -151,12 +141,8 @@ watch_interval = 10
 	}
 
 	// Should use custom daemon value
-	if cfg.Daemon.WatchInterval != 10 {
-		t.Errorf("WatchInterval = %d, want 10", cfg.Daemon.WatchInterval)
-	}
-	// Should preserve default for auto_save_interval (not specified)
-	if cfg.Daemon.AutoSaveInterval != 900 {
-		t.Errorf("AutoSaveInterval = %d, want 900 (default)", cfg.Daemon.AutoSaveInterval)
+	if cfg.Daemon.AutoSaveInterval != 300 {
+		t.Errorf("AutoSaveInterval = %d, want 300", cfg.Daemon.AutoSaveInterval)
 	}
 	// Kitty.Socket should remain empty (default)
 	if cfg.Kitty.Socket != "" {

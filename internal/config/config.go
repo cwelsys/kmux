@@ -11,7 +11,6 @@ import (
 
 // DaemonConfig holds daemon-specific settings.
 type DaemonConfig struct {
-	WatchInterval    int `toml:"watch_interval"`
 	AutoSaveInterval int `toml:"auto_save_interval"`
 }
 
@@ -45,7 +44,6 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Daemon: DaemonConfig{
-			WatchInterval:    5,
 			AutoSaveInterval: 900,
 		},
 		Projects: ProjectsConfig{
@@ -78,9 +76,6 @@ func LoadConfig() (*Config, error) {
 	}
 
 	// Validate and fix invalid values
-	if cfg.Daemon.WatchInterval < 1 {
-		cfg.Daemon.WatchInterval = 5 // default
-	}
 	if cfg.Daemon.AutoSaveInterval < 1 {
 		cfg.Daemon.AutoSaveInterval = 900 // default
 	}
