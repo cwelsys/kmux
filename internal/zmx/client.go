@@ -98,14 +98,12 @@ func (c *Client) KillOrphans(name string) {
 
 // AttachCmd returns the command to attach to a zmx session.
 // This is used to construct the command passed to kitty launch.
-// If kmuxSession is provided, includes a cleanup callback to notify daemon on exit.
-func AttachCmd(zmxName string, kmuxSession string, cmd ...string) []string {
+func AttachCmd(zmxName string, cmd ...string) []string {
 	if zmxName == "" {
 		return nil
 	}
 
-	// Build the zmx attach command
-	zmxCmd := "zmx attach " + zmxName
+	args := []string{"zmx", "attach", zmxName}
 
 	// Add command through interactive shell (loads user's PATH)
 	for _, c := range cmd {
@@ -114,40 +112,10 @@ func AttachCmd(zmxName string, kmuxSession string, cmd ...string) []string {
 			if shell == "" {
 				shell = "/bin/sh"
 			}
-			zmxCmd += " " + shell + " -ic " + shellQuote(c)
+			args = append(args, shell, "-ic", c)
 			break // only one command supported
 		}
 	}
 
-	// If kmux session provided, wrap with notify-close callback
-	if kmuxSession != "" {
-		// After zmx exits, notify daemon. Use $KITTY_WINDOW_ID set by kitty.
-		// Must use interactive shell to get user's PATH for zmx and kmux
-		shell := os.Getenv("SHELL")
-		if shell == "" {
-			shell = "/bin/sh"
-		}
-		fullCmd := zmxCmd + "; kmux internal notify-close $KITTY_WINDOW_ID " + zmxName + " " + kmuxSession
-		return []string{shell, "-ic", fullCmd}
-	}
-
-	// No session context - just run zmx attach directly
-	args := []string{"zmx", "attach", zmxName}
-	for _, c := range cmd {
-		if c != "" {
-			shell := os.Getenv("SHELL")
-			if shell == "" {
-				shell = "/bin/sh"
-			}
-			args = append(args, shell, "-ic", c)
-			break
-		}
-	}
 	return args
-}
-
-// shellQuote returns a shell-safe quoted string.
-func shellQuote(s string) string {
-	// Use single quotes, escaping any single quotes within
-	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }

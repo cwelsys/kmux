@@ -3,9 +3,10 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"strconv"
 
-	"github.com/cwel/kmux/internal/config"
-	"github.com/cwel/kmux/internal/daemon/client"
+	"github.com/cwel/kmux/internal/manager"
+	"github.com/cwel/kmux/internal/state"
 	"github.com/cwel/kmux/internal/store"
 	"github.com/spf13/cobra"
 )
@@ -17,9 +18,13 @@ var detachCmd = &cobra.Command{
 	Long: `Save session state and close session windows.
 
 If session name is provided, detaches that session.
-Otherwise uses $KMUX_SESSION from the environment.`,
+Otherwise uses $KITTY_WINDOW_ID to determine current session.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		s := state.New()
+		k := s.KittyClient()
+		st := s.Store()
+
 		var sessionName string
 		if len(args) > 0 {
 			sessionName = args[0]
@@ -27,11 +32,11 @@ Otherwise uses $KMUX_SESSION from the environment.`,
 			// Try to resolve session from current window
 			windowIDStr := os.Getenv("KITTY_WINDOW_ID")
 			if windowIDStr != "" {
-				var windowID int
-				if _, err := fmt.Sscanf(windowIDStr, "%d", &windowID); err == nil {
-					c := client.New(config.SocketPath())
-					if err := c.EnsureRunning(); err == nil {
-						sessionName, _ = c.Resolve(windowID)
+				windowID, err := strconv.Atoi(windowIDStr)
+				if err == nil {
+					sessInfo, _, err := s.FindWindowSession(windowID)
+					if err == nil && sessInfo != nil {
+						sessionName = sessInfo.Name
 					}
 				}
 			}
@@ -45,14 +50,29 @@ Otherwise uses $KMUX_SESSION from the environment.`,
 			return fmt.Errorf("invalid session name: %w", err)
 		}
 
-		c := client.New(config.SocketPath())
-
-		if err := c.EnsureRunning(); err != nil {
-			return fmt.Errorf("daemon: %w", err)
+		// Get current kitty state
+		kittyState, err := k.GetState()
+		if err != nil {
+			return fmt.Errorf("get kitty state: %w", err)
 		}
 
-		if err := c.Detach(sessionName); err != nil {
-			return err
+		// Derive session from current state using user_vars
+		session := manager.DeriveSession(sessionName, kittyState)
+
+		// Save session
+		if err := st.SaveSession(session); err != nil {
+			return fmt.Errorf("save session: %w", err)
+		}
+
+		// Close windows belonging to this session (check user_vars)
+		for _, osWin := range kittyState {
+			for _, tab := range osWin.Tabs {
+				for _, win := range tab.Windows {
+					if win.UserVars["kmux_session"] == sessionName {
+						k.CloseWindow(win.ID)
+					}
+				}
+			}
 		}
 
 		fmt.Printf("Detached from session: %s\n", sessionName)

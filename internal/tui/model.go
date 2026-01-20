@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,8 +10,8 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/cwel/kmux/internal/config"
-	"github.com/cwel/kmux/internal/daemon/client"
 	"github.com/cwel/kmux/internal/project"
+	"github.com/cwel/kmux/internal/state"
 	"github.com/cwel/kmux/internal/store"
 	"github.com/sahilm/fuzzy"
 )
@@ -25,13 +26,12 @@ const (
 
 // Item represents either a session or a project in the unified list.
 type Item struct {
-	Type       ItemType
-	Name       string
-	Path       string // only for projects
-	PaneCount  int    // only for sessions
-	HasRunning bool   // only for sessions
-	CWD        string // for sessions
-	LastSeen   string // for sessions
+	Type      ItemType
+	Name      string
+	Path      string // only for projects
+	PaneCount int    // only for sessions
+	Status    string // only for sessions: "active", "detached", "saved"
+	CWD       string // for sessions
 }
 
 // Model is the bubbletea model for the TUI.
@@ -52,9 +52,9 @@ type Model struct {
 	height        int
 	err           error
 	quitting      bool
-	action        string // "attach", "kill", or "create" - set when exiting to perform action
-	client        *client.Client
-	cfg           *config.Config
+	action string // "attach", "kill", or "create" - set when exiting to perform action
+	state  *state.State
+	cfg    *config.Config
 
 	// Launch mode (layout selection modal)
 	launchMode      bool
@@ -70,7 +70,7 @@ type Model struct {
 }
 
 // New creates a new TUI model.
-func New(c *client.Client, cfg *config.Config) Model {
+func New(s *state.State, cfg *config.Config) Model {
 	ti := textinput.New()
 	ti.Placeholder = "filter..."
 	ti.CharLimit = 50
@@ -87,7 +87,7 @@ func New(c *client.Client, cfg *config.Config) Model {
 		filterInput:     ti,
 		renameInput:     ri,
 		launchNameInput: li,
-		client:          c,
+		state:           s,
 		cfg:             cfg,
 	}
 }
@@ -97,11 +97,11 @@ func (m Model) Init() tea.Cmd {
 	return m.loadData
 }
 
-// loadData loads session data from daemon and scans for projects.
+// loadData loads session data and scans for projects.
 func (m Model) loadData() tea.Msg {
-	sessions, err := m.client.Sessions(true) // TUI shows all sessions including restore points
+	sessions, err := m.state.Sessions(true) // TUI shows all sessions including restore points
 	if err != nil {
-		return errMsg{err}
+		return errMsg{fmt.Errorf("sessions: %w", err)}
 	}
 
 	var sessionItems []Item
@@ -109,12 +109,11 @@ func (m Model) loadData() tea.Msg {
 	for _, s := range sessions {
 		sessionNames[s.Name] = true
 		sessionItems = append(sessionItems, Item{
-			Type:       ItemSession,
-			Name:       s.Name,
-			PaneCount:  s.Panes,
-			HasRunning: s.Status == "attached" || s.Status == "detached",
-			CWD:        s.CWD,
-			LastSeen:   s.LastSeen,
+			Type:      ItemSession,
+			Name:      s.Name,
+			PaneCount: s.Panes,
+			Status:    s.Status,
+			CWD:       s.CWD,
 		})
 	}
 
@@ -551,7 +550,12 @@ func (m Model) handleConfirmKill(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		// Kill in background, reload to sync state
 		return m, func() tea.Msg {
-			m.client.Kill(session)
+			// Kill zmx sessions and delete save file
+			zmxSessions, _ := m.state.SessionZmxSessions(session)
+			for _, zmxName := range zmxSessions {
+				m.state.ZmxClient().Kill(zmxName)
+			}
+			m.state.Store().DeleteSession(session)
 			return nil // Silently sync - UI already updated
 		}
 	case "n", "N", "esc":
@@ -624,7 +628,7 @@ func (m Model) handleRenameMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		newName := m.renameInput.Value()
 		if newName != "" && m.SelectedSession() != "" {
-			if err := m.client.Rename(m.SelectedSession(), newName); err == nil {
+			if err := m.state.Store().RenameSession(m.SelectedSession(), newName); err == nil {
 				// Update the session name in both lists
 				for i := range m.sessions {
 					if m.sessions[i].Name == m.SelectedSession() {

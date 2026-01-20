@@ -132,7 +132,7 @@ func (m Model) viewSessionList(width, height int) string {
 func (m Model) renderItem(item Item, width int) string {
 	if item.Type == ItemSession {
 		indicator := savedIndicator.String()
-		if item.HasRunning {
+		if item.Status == "active" || item.Status == "detached" {
 			indicator = runningIndicator.String()
 		}
 		name := fmt.Sprintf("%s %s", indicator, item.Name)
@@ -154,11 +154,7 @@ func (m Model) viewPreview(width, height int) string {
 	} else if item.Type == ItemSession {
 		b.WriteString(previewTitleStyle.Render(item.Name) + "\n\n")
 
-		status := "saved"
-		if item.HasRunning {
-			status = "running"
-		}
-		b.WriteString(previewInfoStyle.Render(fmt.Sprintf("status: %s", status)) + "\n")
+		b.WriteString(previewInfoStyle.Render(fmt.Sprintf("status: %s", item.Status)) + "\n")
 		b.WriteString(previewInfoStyle.Render(fmt.Sprintf("panes:  %d", item.PaneCount)) + "\n")
 
 		if item.CWD != "" {
@@ -170,9 +166,6 @@ func (m Model) viewPreview(width, height int) string {
 			b.WriteString(previewInfoStyle.Render(fmt.Sprintf("cwd:    %s", cwd)) + "\n")
 		}
 
-		if item.LastSeen != "" && item.HasRunning {
-			b.WriteString(previewInfoStyle.Render(fmt.Sprintf("active: %s", item.LastSeen)) + "\n")
-		}
 	} else {
 		// Project
 		b.WriteString(previewTitleStyle.Render(item.Name) + "\n\n")

@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cwel/kmux/internal/config"
 	"github.com/cwel/kmux/internal/kitty"
 	"github.com/cwel/kmux/internal/model"
 	"github.com/cwel/kmux/internal/store"
@@ -116,4 +117,32 @@ func isShell(cmd string) bool {
 		}
 	}
 	return false
+}
+
+// LayoutToSession converts a layout template to a session.
+func LayoutToSession(layout *config.Layout, name, cwd string) *model.Session {
+	session := &model.Session{
+		Name:    name,
+		Host:    "local",
+		SavedAt: time.Now(),
+	}
+
+	for _, ltab := range layout.Tabs {
+		tab := model.Tab{
+			Title:  ltab.Title,
+			Layout: ltab.Layout,
+		}
+
+		for _, pane := range ltab.Panes {
+			window := model.Window{
+				CWD:     cwd,
+				Command: pane,
+			}
+			tab.Windows = append(tab.Windows, window)
+		}
+
+		session.Tabs = append(session.Tabs, tab)
+	}
+
+	return session
 }

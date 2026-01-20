@@ -5,8 +5,7 @@ import (
 	"os"
 	"text/tabwriter"
 
-	"github.com/cwel/kmux/internal/config"
-	"github.com/cwel/kmux/internal/daemon/client"
+	"github.com/cwel/kmux/internal/state"
 	"github.com/spf13/cobra"
 )
 
@@ -18,13 +17,9 @@ var lsCmd = &cobra.Command{
 	Short:   "List sessions",
 	Long:    "List running sessions. Use --all to include restore points.",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		c := client.New(config.SocketPath())
+		s := state.New()
 
-		if err := c.EnsureRunning(); err != nil {
-			return fmt.Errorf("daemon: %w", err)
-		}
-
-		sessions, err := c.Sessions(lsAll)
+		sessions, err := s.Sessions(lsAll)
 		if err != nil {
 			return err
 		}
@@ -32,8 +27,8 @@ var lsCmd = &cobra.Command{
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 		fmt.Fprintln(w, "SESSION\tSTATUS\tPANES")
 
-		for _, s := range sessions {
-			fmt.Fprintf(w, "%s\t%s\t%d\n", s.Name, s.Status, s.Panes)
+		for _, sess := range sessions {
+			fmt.Fprintf(w, "%s\t%s\t%d\n", sess.Name, sess.Status, sess.Panes)
 		}
 
 		w.Flush()
