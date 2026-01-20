@@ -32,13 +32,14 @@ type SplitInfo struct {
 
 // windowCreator encapsulates window creation state during restore.
 type windowCreator struct {
-	k          *kitty.Client
-	session    *model.Session
-	tabIdx     int
-	tab        model.Tab
-	windowIdx  int
-	creations  []WindowCreate
-	firstWinID int
+	k           *kitty.Client
+	session     *model.Session
+	tabIdx      int
+	tab         model.Tab
+	windowIdx   int
+	creations   []WindowCreate
+	firstWinID  int
+	tabLocation string // location for first tab creation (e.g., "before" for before pinned tabs)
 }
 
 // createWindow creates a single kitty window and records the creation.
@@ -49,8 +50,7 @@ func (wc *windowCreator) createWindow(win model.Window, split SplitInfo) (int, e
 	if zmxName == "" {
 		zmxName = wc.session.ZmxSessionName(wc.tabIdx, wc.windowIdx)
 	}
-	// Pass session name for cleanup callback
-	zmxCmd := zmx.AttachCmd(zmxName, wc.session.Name, win.Command)
+	zmxCmd := zmx.AttachCmd(zmxName, win.Command)
 
 	// Convert split type to kitty location
 	location := ""
@@ -58,6 +58,9 @@ func (wc *windowCreator) createWindow(win model.Window, split SplitInfo) (int, e
 	if launchType == "hsplit" || launchType == "vsplit" {
 		launchType = "window"
 		location = split.Type
+	} else if launchType == "tab" && wc.tabLocation != "" {
+		// Use custom tab location (e.g., "before" for before pinned tabs)
+		location = wc.tabLocation
 	}
 
 	opts := kitty.LaunchOpts{
@@ -183,6 +186,11 @@ func (wc *windowCreator) restoreSubtree(node *model.SplitNode, parentSplit Split
 	return spineWinID, nil
 }
 
+// RestoreTabOpts holds options for RestoreTab.
+type RestoreTabOpts struct {
+	TabLocation string // location for tab creation (e.g., "before" for before pinned tabs)
+}
+
 // RestoreTab creates kitty windows for a tab with split layout.
 // Returns the window creations for mapping and the first window ID for focusing.
 func RestoreTab(
@@ -190,12 +198,19 @@ func RestoreTab(
 	session *model.Session,
 	tabIdx int,
 	tab model.Tab,
+	opts ...RestoreTabOpts,
 ) ([]WindowCreate, int, error) {
+	var tabLocation string
+	if len(opts) > 0 {
+		tabLocation = opts[0].TabLocation
+	}
+
 	wc := &windowCreator{
-		k:       k,
-		session: session,
-		tabIdx:  tabIdx,
-		tab:     tab,
+		k:           k,
+		session:     session,
+		tabIdx:      tabIdx,
+		tab:         tab,
+		tabLocation: tabLocation,
 	}
 
 	// Handle simple kitty layouts (tall, fat, grid, horizontal, vertical)

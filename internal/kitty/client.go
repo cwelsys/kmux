@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os/exec"
 )
 
@@ -86,7 +85,6 @@ func (c *Client) Launch(opts LaunchOpts) (int, error) {
 		args = append(args, opts.Cmd...)
 	}
 
-	log.Printf("[kitty] Launch: args=%v", args)
 	cmd := exec.Command("kitty", args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -187,3 +185,55 @@ func (c *Client) GotoLayout(layout string) error {
 	}
 	return nil
 }
+
+// SetTabTitle sets the title of a tab by matching a window ID in that tab.
+func (c *Client) SetTabTitle(windowID int, title string) error {
+	args := []string{"@"}
+	if c.socketPath != "" {
+		args = append(args, "--to", "unix:"+c.socketPath)
+	}
+	args = append(args, "set-tab-title", "--match", fmt.Sprintf("id:%d", windowID), title)
+
+	cmd := exec.Command("kitty", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("kitty @ set-tab-title: %w: %s", err, stderr.String())
+	}
+	return nil
+}
+
+// FocusTab focuses a tab by matching a window ID in that tab.
+func (c *Client) FocusTab(windowID int) error {
+	args := []string{"@"}
+	if c.socketPath != "" {
+		args = append(args, "--to", "unix:"+c.socketPath)
+	}
+	args = append(args, "focus-tab", "--match", fmt.Sprintf("id:%d", windowID))
+
+	cmd := exec.Command("kitty", args...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("kitty @ focus-tab: %w: %s", err, stderr.String())
+	}
+	return nil
+}
+
+// FindFirstPinnedWindow returns the first window with PINNED user_var set.
+// Returns nil if no pinned windows found.
+func FindFirstPinnedWindow(state KittyState) *Window {
+	for _, osWin := range state {
+		for _, tab := range osWin.Tabs {
+			for i := range tab.Windows {
+				if tab.Windows[i].UserVars["PINNED"] != "" {
+					return &tab.Windows[i]
+				}
+			}
+		}
+	}
+	return nil
+}
+
