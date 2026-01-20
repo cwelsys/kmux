@@ -84,18 +84,6 @@ func (c *Client) Kill(name string) error {
 	return nil
 }
 
-// KillOrphans kills any orphaned "zmx attach <name>" processes.
-// zmx forks internally and the child process can escape when the terminal closes.
-func (c *Client) KillOrphans(name string) {
-	if name == "" {
-		return
-	}
-	// Use pkill to find and kill any "zmx attach <name>" processes
-	// The -f flag matches against the full command line
-	cmd := exec.Command("pkill", "-f", "zmx attach "+name)
-	cmd.Run() // Ignore errors - process may not exist
-}
-
 // AttachCmd returns the command to attach to a zmx session.
 // This is used to construct the command passed to kitty launch.
 func AttachCmd(zmxName string, cmd ...string) []string {
