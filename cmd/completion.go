@@ -5,8 +5,26 @@ import (
 	"os"
 	"strings"
 
+	"github.com/cwel/kmux/internal/state"
 	"github.com/spf13/cobra"
 )
+
+// completeSessionNames returns session names for shell completion.
+func completeSessionNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	s := state.New()
+	sessions, err := s.Sessions(true) // include restore points
+	if err != nil {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+
+	var names []string
+	for _, sess := range sessions {
+		if strings.HasPrefix(sess.Name, toComplete) {
+			names = append(names, sess.Name)
+		}
+	}
+	return names, cobra.ShellCompDirectiveNoFileComp
+}
 
 var completionCmd = &cobra.Command{
 	Use:   "completion [bash|zsh|fish|powershell]",

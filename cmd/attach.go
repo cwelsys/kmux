@@ -31,7 +31,8 @@ Examples:
   kmux a myproject          # session named "myproject"
   kmux a ~/src/foo          # session "foo" starting in ~/src/foo
   kmux a ~/src/foo bar      # session "bar" starting in ~/src/foo`,
-	Args: cobra.RangeArgs(0, 2),
+	Args:              cobra.RangeArgs(0, 2),
+	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		name, cwd, err := resolveAttachArgs(args, attachCWD)
 		if err != nil {

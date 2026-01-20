@@ -13,6 +13,13 @@ var renameCmd = &cobra.Command{
 	Short: "Rename a session",
 	Long:  `Rename a session. Updates save files, ownership tracking, and kitty tab titles.`,
 	Args:  cobra.ExactArgs(2),
+	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		// Only complete the first arg (old name), not the second (new name)
+		if len(args) == 0 {
+			return completeSessionNames(cmd, args, toComplete)
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		oldName := args[0]
 		newName := args[1]

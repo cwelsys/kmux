@@ -12,11 +12,12 @@ import (
 var killAll bool
 
 var killCmd = &cobra.Command{
-	Use:     "kill <name>... | --all",
-	Aliases: []string{"k", "rm"},
-	Short:   "Kill sessions",
-	Long:    "Terminate zmx sessions and delete saved state. Use --all or * to kill all sessions including restore points.",
-	Args:    cobra.ArbitraryArgs,
+	Use:               "kill <name>... | --all",
+	Aliases:           []string{"k", "rm"},
+	Short:             "Kill sessions",
+	Long:              "Terminate zmx sessions and delete saved state. Use --all or * to kill all sessions including restore points.",
+	Args:              cobra.ArbitraryArgs,
+	ValidArgsFunction: completeSessionNames,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		s := state.New()
 
@@ -117,7 +118,6 @@ func killSession(s *state.State, name string) error {
 	// Kill all zmx sessions for this session
 	for zmxName := range zmxToKill {
 		z.Kill(zmxName)
-		z.KillOrphans(zmxName)
 	}
 
 	// Delete saved session
