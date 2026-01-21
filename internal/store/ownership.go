@@ -88,16 +88,6 @@ func GetSessionForZmx(zmxName string) string {
 	return o.ZmxToSession[zmxName]
 }
 
-// SetSessionForZmx sets the session name for a zmx session.
-func SetSessionForZmx(zmxName, sessionName string) error {
-	o, err := LoadOwnership()
-	if err != nil {
-		return err
-	}
-	o.ZmxToSession[zmxName] = sessionName
-	return SaveOwnership(o)
-}
-
 // RenameSessionOwnership updates all zmx mappings from oldName to newName.
 func RenameSessionOwnership(oldName, newName string) error {
 	o, err := LoadOwnership()
@@ -113,47 +103,4 @@ func RenameSessionOwnership(oldName, newName string) error {
 	}
 
 	return SaveOwnership(o)
-}
-
-// RemoveSessionOwnership removes all zmx mappings for a session.
-func RemoveSessionOwnership(sessionName string) error {
-	o, err := LoadOwnership()
-	if err != nil {
-		return err
-	}
-
-	// Remove all entries that point to this session
-	for zmxName, sessName := range o.ZmxToSession {
-		if sessName == sessionName {
-			delete(o.ZmxToSession, zmxName)
-		}
-	}
-
-	return SaveOwnership(o)
-}
-
-// RemoveZmxOwnership removes a specific zmx session from ownership.
-func RemoveZmxOwnership(zmxName string) error {
-	o, err := LoadOwnership()
-	if err != nil {
-		return err
-	}
-	delete(o.ZmxToSession, zmxName)
-	return SaveOwnership(o)
-}
-
-// GetZmxSessionsForSession returns all zmx session names owned by a session.
-func GetZmxSessionsForSession(sessionName string) []string {
-	o, err := LoadOwnership()
-	if err != nil {
-		return nil
-	}
-
-	var zmxNames []string
-	for zmxName, sessName := range o.ZmxToSession {
-		if sessName == sessionName {
-			zmxNames = append(zmxNames, zmxName)
-		}
-	}
-	return zmxNames
 }

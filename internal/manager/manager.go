@@ -7,21 +7,7 @@ import (
 	"github.com/cwel/kmux/internal/config"
 	"github.com/cwel/kmux/internal/kitty"
 	"github.com/cwel/kmux/internal/model"
-	"github.com/cwel/kmux/internal/store"
-	"github.com/cwel/kmux/internal/zmx"
 )
-
-// Manager coordinates kitty, zmx, and session storage.
-type Manager struct {
-	kitty *kitty.Client
-	zmx   *zmx.Client
-	store *store.Store
-}
-
-// New creates a new Manager.
-func New(k *kitty.Client, z *zmx.Client, s *store.Store) *Manager {
-	return &Manager{kitty: k, zmx: z, store: s}
-}
 
 // DeriveSession creates a Session from current kitty state.
 // Uses kitty window user_vars as source of truth for session membership and zmx names.

@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/cwel/kmux/internal/kitty"
 	"github.com/cwel/kmux/internal/state"
@@ -46,15 +45,8 @@ Use --session to specify which session to split (for scripting outside sessions)
 
 		// Try to resolve session from current window if not specified
 		if sessionName == "" {
-			windowIDStr := os.Getenv("KITTY_WINDOW_ID")
-			if windowIDStr != "" {
-				windowID, err := strconv.Atoi(windowIDStr)
-				if err == nil {
-					sessInfo, _, err := s.FindWindowSession(windowID)
-					if err == nil && sessInfo != nil {
-						sessionName = sessInfo.Name
-					}
-				}
+			if sessInfo, _, err := s.GetCurrentSession(); err == nil && sessInfo != nil {
+				sessionName = sessInfo.Name
 			}
 		}
 

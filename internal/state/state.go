@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/cwel/kmux/internal/config"
 	"github.com/cwel/kmux/internal/kitty"
 	"github.com/cwel/kmux/internal/model"
 	"github.com/cwel/kmux/internal/store"
@@ -31,19 +32,15 @@ type State struct {
 
 // New creates a new State with default clients.
 func New() *State {
+	cfg, _ := config.LoadConfig()
+	socketPath := ""
+	if cfg != nil && cfg.Kitty.Socket != "" {
+		socketPath = cfg.Kitty.Socket
+	}
 	return &State{
-		kitty: kitty.NewClient(),
+		kitty: kitty.NewClientWithSocket(socketPath),
 		zmx:   zmx.NewClient(),
 		store: store.DefaultStore(),
-	}
-}
-
-// NewWithClients creates a State with custom clients (for testing).
-func NewWithClients(k *kitty.Client, z *zmx.Client, s *store.Store) *State {
-	return &State{
-		kitty: k,
-		zmx:   z,
-		store: s,
 	}
 }
 
@@ -344,22 +341,6 @@ func (s *State) GetWindowsForSession(name string) ([]kitty.Window, error) {
 		}
 	}
 	return windows, nil
-}
-
-// CountSessionPanes returns the number of panes for a session (from kitty or zmx).
-func (s *State) CountSessionPanes(name string) (int, error) {
-	// First try kitty (active session)
-	windows, err := s.GetWindowsForSession(name)
-	if err == nil && len(windows) > 0 {
-		return len(windows), nil
-	}
-
-	// Fall back to zmx (detached session)
-	zmxSessions, err := s.SessionZmxSessions(name)
-	if err != nil {
-		return 0, err
-	}
-	return len(zmxSessions), nil
 }
 
 // KittyClient returns the kitty client for direct operations.

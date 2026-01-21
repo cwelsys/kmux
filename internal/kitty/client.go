@@ -9,17 +9,18 @@ import (
 
 // Client communicates with kitty via `kitty @` commands.
 type Client struct {
-	socketPath string // Empty means use default (KITTY_LISTEN_ON)
+	socketPath string // Socket path from config, or empty to use kitty's default discovery
 }
 
-// NewClient creates a new kitty client.
+// NewClient creates a new kitty client with no socket path.
+// Use NewClientWithSocket to specify the socket from config.
 func NewClient() *Client {
 	return &Client{}
 }
 
-// NewClientWithSocket creates a client that connects to a specific socket.
-func NewClientWithSocket(path string) *Client {
-	return &Client{socketPath: path}
+// NewClientWithSocket creates a client with an explicit socket path.
+func NewClientWithSocket(socketPath string) *Client {
+	return &Client{socketPath: socketPath}
 }
 
 // ParseState parses JSON output from `kitty @ ls`.

@@ -55,15 +55,9 @@ func ValidateSessionName(name string) error {
 	return nil
 }
 
-// validateSessionName is a deprecated alias for ValidateSessionName.
-// Kept for internal backward compatibility.
-func validateSessionName(name string) error {
-	return ValidateSessionName(name)
-}
-
 // SaveSession saves a session to disk.
 func (s *Store) SaveSession(session *model.Session) error {
-	if err := validateSessionName(session.Name); err != nil {
+	if err := ValidateSessionName(session.Name); err != nil {
 		return err
 	}
 
@@ -92,7 +86,7 @@ func (s *Store) SaveSession(session *model.Session) error {
 
 // LoadSession loads a session from disk.
 func (s *Store) LoadSession(name string) (*model.Session, error) {
-	if err := validateSessionName(name); err != nil {
+	if err := ValidateSessionName(name); err != nil {
 		return nil, err
 	}
 
@@ -132,7 +126,7 @@ func (s *Store) ListSessions() ([]string, error) {
 
 // DeleteSession removes a session file.
 func (s *Store) DeleteSession(name string) error {
-	if err := validateSessionName(name); err != nil {
+	if err := ValidateSessionName(name); err != nil {
 		return err
 	}
 

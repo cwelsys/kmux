@@ -46,6 +46,9 @@ func DefaultConfig() *Config {
 		Daemon: DaemonConfig{
 			AutoSaveInterval: 900,
 		},
+		Kitty: KittyConfig{
+			Socket: "/tmp/mykitty",
+		},
 		Projects: ProjectsConfig{
 			Directories: nil, // User must configure - no defaults
 			MaxDepth:    2,

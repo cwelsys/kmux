@@ -144,8 +144,8 @@ auto_save_interval = 300
 	if cfg.Daemon.AutoSaveInterval != 300 {
 		t.Errorf("AutoSaveInterval = %d, want 300", cfg.Daemon.AutoSaveInterval)
 	}
-	// Kitty.Socket should remain empty (default)
-	if cfg.Kitty.Socket != "" {
-		t.Errorf("Kitty.Socket = %q, want empty (default)", cfg.Kitty.Socket)
+	// Kitty.Socket should use default
+	if cfg.Kitty.Socket != "/tmp/mykitty" {
+		t.Errorf("Kitty.Socket = %q, want /tmp/mykitty (default)", cfg.Kitty.Socket)
 	}
 }
