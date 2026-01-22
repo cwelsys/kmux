@@ -31,7 +31,8 @@ type BrowserConfig struct {
 // HostConfig holds configuration for a remote host.
 // Hosts are referenced by their SSH config alias - all auth/proxy is handled by SSH.
 type HostConfig struct {
-	ZmxPath string `toml:"zmx_path"` // optional path to zmx on remote (default: "zmx")
+	ZmxPath  string `toml:"zmx_path"`  // optional path to zmx on remote (default: "zmx")
+	KmuxPath string `toml:"kmux_path"` // optional path to kmux on remote (default: "kmux")
 }
 
 // Config holds all kmux configuration.
