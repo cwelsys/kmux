@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -404,24 +405,12 @@ func (s *State) GetCurrentSession() (*SessionInfo, string, string, error) {
 		return nil, "", "", nil
 	}
 
-	windowID, err := parseWindowID(windowIDStr)
+	windowID, err := strconv.Atoi(windowIDStr)
 	if err != nil {
 		return nil, "", "", nil
 	}
 
 	return s.FindWindowSession(windowID)
-}
-
-// parseWindowID parses a window ID string into an int.
-func parseWindowID(s string) (int, error) {
-	var n int
-	for _, c := range s {
-		if c < '0' || c > '9' {
-			return 0, os.ErrInvalid
-		}
-		n = n*10 + int(c-'0')
-	}
-	return n, nil
 }
 
 // SessionZmxSessions returns the running zmx session names for a session.

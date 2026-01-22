@@ -2,8 +2,10 @@ package cmd
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/cwel/kmux/internal/state"
 	"github.com/spf13/cobra"
@@ -12,14 +14,17 @@ import (
 // completeSessionNames returns session names for shell completion.
 func completeSessionNames(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	s := state.New()
-	sessions, err := s.Sessions(true) // include restore points
-	if err != nil {
-		return nil, cobra.ShellCompDirectiveNoFileComp
-	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	sessions, _ := s.AllSessions(ctx, true)
+
+	seen := make(map[string]bool)
 	var names []string
 	for _, sess := range sessions {
-		if strings.HasPrefix(sess.Name, toComplete) {
+		if strings.HasPrefix(sess.Name, toComplete) && !seen[sess.Name] {
+			seen[sess.Name] = true
 			names = append(names, sess.Name)
 		}
 	}

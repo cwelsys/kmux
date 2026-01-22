@@ -58,10 +58,10 @@ func AttachSession(s *state.State, opts AttachOpts) (*AttachResult, error) {
 
 	if len(zmxSessions) > 0 {
 		// Detached session - reattach to running zmx
-		session, _ = st.LoadSession(opts.Name)
+		session = loadSessionForHost(st, opts.Name, host)
 
 		if session == nil {
-			// No save file - create layout with windows for each zmx session
+			// No save file (or wrong host) - create layout with windows for each zmx session
 			var modelWindows []model.Window
 			for _, zmxName := range zmxSessions {
 				modelWindows = append(modelWindows, model.Window{
@@ -77,8 +77,6 @@ func AttachSession(s *state.State, opts AttachOpts) (*AttachResult, error) {
 					{Title: opts.Name, Layout: "splits", Windows: modelWindows},
 				},
 			}
-		} else {
-			session.Host = host
 		}
 	} else if opts.Layout != "" {
 		// New session with layout template
@@ -90,7 +88,7 @@ func AttachSession(s *state.State, opts AttachOpts) (*AttachResult, error) {
 		session.Host = host
 	} else {
 		// Try to load restore point, or create fresh
-		session, _ = st.LoadSession(opts.Name)
+		session = loadSessionForHost(st, opts.Name, host)
 		if session == nil {
 			session = &model.Session{
 				Name:    opts.Name,
@@ -100,8 +98,6 @@ func AttachSession(s *state.State, opts AttachOpts) (*AttachResult, error) {
 					{Title: opts.Name, Layout: "splits", Windows: []model.Window{{CWD: opts.CWD}}},
 				},
 			}
-		} else {
-			session.Host = host
 		}
 	}
 
@@ -232,10 +228,27 @@ func KillSession(s *state.State, opts KillOpts) error {
 		zmxClient.Kill(zmxName)
 	}
 
-	// Delete saved session (only for local host - remote sessions don't have local save files)
-	if host == "local" {
-		st.DeleteSession(opts.Name)
-	}
+	// Delete saved session (save files are always stored locally)
+	st.DeleteSession(opts.Name)
 
 	return nil
+}
+
+// loadSessionForHost loads a save file only if its Host matches the target host.
+// Returns nil if no save file exists or if the save file is for a different host.
+func loadSessionForHost(st *store.Store, name, host string) *model.Session {
+	session, err := st.LoadSession(name)
+	if err != nil || session == nil {
+		return nil
+	}
+
+	savedHost := session.Host
+	if savedHost == "" {
+		savedHost = "local"
+	}
+	if savedHost != host {
+		return nil
+	}
+
+	return session
 }
