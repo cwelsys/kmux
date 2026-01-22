@@ -9,10 +9,8 @@ var (
 	lavender = lipgloss.Color("#b4befe") // accent
 	green    = lipgloss.Color("#a6e3a1") // success
 	peach    = lipgloss.Color("#fab387") // warning
-	red      = lipgloss.Color("#f38ba8") // error
 
 	// Neutral tones
-	text     = lipgloss.Color("#cdd6f4")
 	subtext1 = lipgloss.Color("#bac2de")
 	subtext0 = lipgloss.Color("#a6adc8")
 	overlay1 = lipgloss.Color("#7f849c")
@@ -22,10 +20,8 @@ var (
 
 var (
 	// Theme aliases
-	primaryColor   = blue
-	secondaryColor = overlay1
-	accentColor    = lavender
-	successColor   = green
+	primaryColor = blue
+	successColor = green
 
 	// Borders
 	borderStyle = lipgloss.NewStyle().

@@ -63,6 +63,8 @@ func (m Model) View() string {
 		content = m.viewConfirmIgnore(m.width, m.height)
 	} else if m.launchMode {
 		content = m.viewLaunchModal(m.width, m.height)
+	} else if m.hostMode {
+		content = m.viewHostModal(m.width, m.height)
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, title, content, helpBar)
@@ -94,7 +96,7 @@ func (m Model) viewSessionList(width, height int) string {
 		// Sessions section
 		b.WriteString(sectionHeaderStyle.Render("Sessions") + "\n")
 
-		if len(m.sessions) == 0 {
+		if len(m.sessions) == 0 && len(m.loadingHosts) == 0 {
 			b.WriteString(dimStyle.Render("  No sessions") + "\n")
 		} else {
 			for _, s := range m.sessions {
@@ -106,6 +108,18 @@ func (m Model) viewSessionList(width, height int) string {
 				}
 				itemIdx++
 			}
+		}
+
+		// Show loading indicators for remote hosts
+		if len(m.loadingHosts) > 0 {
+			for host := range m.loadingHosts {
+				b.WriteString(dimStyle.Render(fmt.Sprintf("  ⏳ Loading %s...", host)) + "\n")
+			}
+		}
+
+		// Show host errors
+		for host, err := range m.hostErrors {
+			b.WriteString(dimStyle.Render(fmt.Sprintf("  ⚠ %s: %v", host, err)) + "\n")
 		}
 
 		// Projects section
@@ -135,9 +149,16 @@ func (m Model) renderItem(item Item, width int) string {
 		if item.Status == "active" || item.Status == "detached" {
 			indicator = runningIndicator.String()
 		}
-		name := fmt.Sprintf("%s %s", indicator, item.Name)
+
+		// Format name with host suffix for non-local sessions
+		name := item.Name
+		if item.Host != "" && item.Host != "local" {
+			name = fmt.Sprintf("%s@%s", item.Name, item.Host)
+		}
+
+		displayName := fmt.Sprintf("%s %s", indicator, name)
 		panes := fmt.Sprintf("(%d)", item.PaneCount)
-		return fmt.Sprintf("%-*s %s", width-8, name, panes)
+		return fmt.Sprintf("%-*s %s", width-8, displayName, panes)
 	}
 	// Project
 	indicator := projectIndicator.String()
@@ -152,10 +173,19 @@ func (m Model) viewPreview(width, height int) string {
 	if item == nil {
 		b.WriteString(dimStyle.Render("No item selected"))
 	} else if item.Type == ItemSession {
-		b.WriteString(previewTitleStyle.Render(item.Name) + "\n\n")
+		// Show name with host for remote sessions
+		title := item.Name
+		if item.Host != "" && item.Host != "local" {
+			title = fmt.Sprintf("%s@%s", item.Name, item.Host)
+		}
+		b.WriteString(previewTitleStyle.Render(title) + "\n\n")
 
 		b.WriteString(previewInfoStyle.Render(fmt.Sprintf("status: %s", item.Status)) + "\n")
 		b.WriteString(previewInfoStyle.Render(fmt.Sprintf("panes:  %d", item.PaneCount)) + "\n")
+
+		if item.Host != "" && item.Host != "local" {
+			b.WriteString(previewInfoStyle.Render(fmt.Sprintf("host:   %s", item.Host)) + "\n")
+		}
 
 		if item.CWD != "" {
 			// Shorten home directory
@@ -192,9 +222,13 @@ func (m Model) viewHelpBar() string {
 	}
 	// Show 'l' option when a project is selected
 	if m.SelectedProject() != nil {
-		return helpStyle.Render("[enter] create  [l] options  [z] browse  [d] hide  [?] help  [q] quit")
+		return helpStyle.Render("[enter] create  [l] options  [z] browse  [Z] remote  [d] hide  [?] help  [q] quit")
 	}
-	return helpStyle.Render("[enter] attach  [z] browse  [d] delete  [r] rename  [?] help  [q] quit")
+	// Show host info for remote sessions
+	if item := m.SelectedItem(); item != nil && item.Type == ItemSession && item.Host != "" && item.Host != "local" {
+		return helpStyle.Render("[enter] attach  [z] browse  [Z] remote  [d] delete  [?] help  [q] quit")
+	}
+	return helpStyle.Render("[enter] attach  [z] browse  [Z] remote  [d] delete  [r] rename  [?] help  [q] quit")
 }
 
 func (m Model) viewHelp() string {
@@ -206,7 +240,8 @@ func (m Model) viewHelp() string {
     ↓/j       Move down
     enter     Attach/create session
     l         Launch with options (projects)
-    z         Browse filesystem
+    z         Browse filesystem (local)
+    Z         Browse filesystem (select host)
     d         Delete session / hide project
     r         Rename session
     R         Refresh list
@@ -214,6 +249,7 @@ func (m Model) viewHelp() string {
     ?         Toggle help
     q/esc     Quit (esc clears filter first)
 
+  Remote sessions appear with @hostname suffix.
   Press any key to close this help.
 `
 	style := borderStyle.Width(50).Padding(1, 2)
@@ -222,7 +258,14 @@ func (m Model) viewHelp() string {
 
 func (m Model) viewConfirmKill(width, height int) string {
 	name := m.SelectedSession()
-	msg := fmt.Sprintf("Kill session '%s'?\n\n[y] yes  [n] no", name)
+	host := m.SelectedSessionHost()
+
+	var msg string
+	if host != "" && host != "local" {
+		msg = fmt.Sprintf("Kill session '%s' on %s?\n\n[y] yes  [n] no", name, host)
+	} else {
+		msg = fmt.Sprintf("Kill session '%s'?\n\n[y] yes  [n] no", name)
+	}
 	style := borderStyle.Width(40).Padding(1, 2)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, style.Render(msg))
 }
@@ -236,6 +279,30 @@ func (m Model) viewConfirmIgnore(width, height int) string {
 	msg := fmt.Sprintf("Hide project '%s'?\n\nThis adds it to your ignore list.\n\n[y] yes  [n] no", name)
 	style := borderStyle.Width(45).Padding(1, 2)
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, style.Render(msg))
+}
+
+func (m Model) viewHostModal(width, height int) string {
+	var b strings.Builder
+
+	b.WriteString(previewTitleStyle.Render("Select Host") + "\n\n")
+
+	for i, host := range m.hostList {
+		indicator := "○"
+		if i == m.hostCursor {
+			indicator = "●"
+		}
+		style := itemStyle
+		if i == m.hostCursor {
+			style = selectedItemStyle
+		}
+		b.WriteString(style.Render(fmt.Sprintf("  %s %s", indicator, host)) + "\n")
+	}
+
+	b.WriteString("\n")
+	b.WriteString(dimStyle.Render("[↑/↓] select  [enter] browse  [esc] cancel"))
+
+	style := borderStyle.Width(35).Padding(1, 2)
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, style.Render(b.String()))
 }
 
 func (m Model) viewLaunchModal(width, height int) string {

@@ -6,14 +6,62 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+
+	"github.com/cwel/kmux/internal/config"
 )
 
-// Client communicates with zmx CLI.
-type Client struct{}
+// Client communicates with zmx CLI, either locally or over SSH.
+type Client struct {
+	host    string             // SSH alias or "local"
+	hostCfg *config.HostConfig // nil for local
+}
 
-// NewClient creates a new zmx client.
+// NewClient creates a local zmx client.
 func NewClient() *Client {
-	return &Client{}
+	return &Client{host: "local"}
+}
+
+// NewRemoteClient creates a zmx client that executes commands over SSH.
+func NewRemoteClient(sshAlias string, cfg *config.HostConfig) *Client {
+	return &Client{
+		host:    sshAlias,
+		hostCfg: cfg,
+	}
+}
+
+// IsRemote returns true if this client connects to a remote host.
+func (c *Client) IsRemote() bool {
+	return c.host != "local"
+}
+
+// Host returns the host this client connects to ("local" or SSH alias).
+func (c *Client) Host() string {
+	return c.host
+}
+
+// zmxPath returns the path to zmx binary (for remote, may be overridden in config).
+func (c *Client) zmxPath() string {
+	if c.hostCfg != nil && c.hostCfg.ZmxPath != "" {
+		return c.hostCfg.ZmxPath
+	}
+	return "zmx"
+}
+
+// runZmx runs a zmx command, either locally or over SSH.
+func (c *Client) runZmx(args ...string) *exec.Cmd {
+	if c.IsRemote() {
+		// Build SSH command: ssh <alias> "zmx <args>"
+		zmxCmd := c.zmxPath() + " " + strings.Join(args, " ")
+		return exec.Command("ssh", c.host, zmxCmd)
+	}
+
+	// Local: run through login shell to ensure proper PATH
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "/bin/sh"
+	}
+	shellCmd := "zmx " + strings.Join(args, " ")
+	return exec.Command(shell, "-lc", shellCmd)
 }
 
 // ParseList parses output from `zmx list`.
@@ -52,7 +100,7 @@ func ParseList(output string) []string {
 
 // List returns all active zmx sessions.
 func (c *Client) List() ([]string, error) {
-	cmd := exec.Command("zmx", "list")
+	cmd := c.runZmx("list")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -74,7 +122,7 @@ func (c *Client) Kill(name string) error {
 	if name == "" {
 		return fmt.Errorf("zmx kill: session name is required")
 	}
-	cmd := exec.Command("zmx", "kill", name)
+	cmd := c.runZmx("kill", name)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -85,22 +133,41 @@ func (c *Client) Kill(name string) error {
 }
 
 // AttachCmd returns the command to attach to a zmx session.
-// This is used to construct the command passed to kitty launch.
-func AttachCmd(zmxName string, cmd ...string) []string {
+// For local: ["zmx", "attach", name, ...]
+// For remote: ["kitten", "ssh", host, "-t", "zmx", "attach", name, ...]
+func (c *Client) AttachCmd(zmxName string, cmd ...string) []string {
 	if zmxName == "" {
 		return nil
 	}
 
-	args := []string{"zmx", "attach", zmxName}
+	zmxPath := c.zmxPath()
+
+	if c.IsRemote() {
+		// Remote: use kitten ssh to connect and run zmx
+		args := []string{"kitten", "ssh", c.host, "-t", zmxPath, "attach", zmxName}
+
+		// Add command through shell if provided
+		for _, cm := range cmd {
+			if cm != "" {
+				// On remote, use default shell (ssh provides login shell)
+				args = append(args, "--", "sh", "-ic", cm)
+				break
+			}
+		}
+		return args
+	}
+
+	// Local: direct zmx command
+	args := []string{zmxPath, "attach", zmxName}
 
 	// Add command through interactive shell (loads user's PATH)
-	for _, c := range cmd {
-		if c != "" {
+	for _, cm := range cmd {
+		if cm != "" {
 			shell := os.Getenv("SHELL")
 			if shell == "" {
 				shell = "/bin/sh"
 			}
-			args = append(args, shell, "-ic", c)
+			args = append(args, shell, "-ic", cm)
 			break // only one command supported
 		}
 	}

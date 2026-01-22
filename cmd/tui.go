@@ -2,15 +2,11 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/cwel/kmux/internal/config"
 	"github.com/cwel/kmux/internal/manager"
-	"github.com/cwel/kmux/internal/model"
 	"github.com/cwel/kmux/internal/state"
-	"github.com/cwel/kmux/internal/store"
 	"github.com/cwel/kmux/internal/tui"
 )
 
@@ -40,13 +36,15 @@ func runTUI() error {
 	switch action {
 	case "attach":
 		session := result.SelectedSession()
+		host := result.SelectedSessionHost()
 		if session == "" {
 			return nil
 		}
-		return attachSession(s, session, "", "")
+		return attachSessionWithHost(s, session, "", "", host)
 	case "create":
 		// Determine path and name - either from browser or project selection
 		var path, name string
+		host := result.SelectedHost()
 
 		if browserPath := result.BrowserPath(); browserPath != "" {
 			// From file browser
@@ -67,125 +65,56 @@ func runTUI() error {
 			return nil
 		}
 
-		// Create session with name, cwd, and optional layout
-		return attachSession(s, name, path, result.LaunchLayout())
+		// Create session with name, cwd, optional layout, and host
+		return attachSessionWithHost(s, name, path, result.LaunchLayout(), host)
 	case "kill":
 		session := result.SelectedSession()
+		host := result.SelectedSessionHost()
 		if session == "" {
 			return nil
 		}
-		return killSessionFromTUI(s, session)
+		return killSessionWithHost(s, session, host)
 	}
 
 	return nil
 }
 
-// attachSession handles attach logic for TUI (mirrors cmd/attach.go logic)
-func attachSession(s *state.State, name, cwd, layout string) error {
-	// Check if session is already active
-	windows, err := s.GetWindowsForSession(name)
-	if err == nil && len(windows) > 0 {
-		// Session is active - focus existing window
-		s.KittyClient().FocusWindow(windows[0].ID)
-		fmt.Printf("Focused existing session: %s\n", name)
-		return nil
+// attachSessionWithHost handles attach logic for TUI with host support
+func attachSessionWithHost(s *state.State, name, cwd, layout, host string) error {
+	result, err := manager.AttachSession(s, manager.AttachOpts{
+		Name:   name,
+		Host:   host,
+		CWD:    cwd,
+		Layout: layout,
+	})
+	if err != nil {
+		return err
 	}
 
-	if cwd == "" {
-		cwd, _ = os.Getwd()
+	// Print result
+	switch result.Action {
+	case "focused":
+		fmt.Printf("Focused existing session: %s\n", result.SessionName)
+	default:
+		if result.Host != "local" {
+			fmt.Printf("Attached to session: %s@%s\n", result.SessionName, result.Host)
+		} else {
+			fmt.Printf("Attached to session: %s\n", result.SessionName)
+		}
+	}
+	return nil
+}
+
+// killSessionWithHost kills a session on a specific host
+func killSessionWithHost(s *state.State, name, host string) error {
+	if err := manager.KillSession(s, manager.KillOpts{Name: name, Host: host}); err != nil {
+		return err
 	}
 
-	// Check if session has running zmx (detached)
-	zmxSessions, _ := s.SessionZmxSessions(name)
-
-	var session *model.Session
-
-	if len(zmxSessions) > 0 {
-		// Detached session - reattach to running zmx
-		session, _ = s.Store().LoadSession(name)
-
-		if session == nil {
-			// No save file - create layout with windows for each zmx session
-			var windows []model.Window
-			for _, zmxName := range zmxSessions {
-				windows = append(windows, model.Window{
-					CWD:     cwd,
-					ZmxName: zmxName,
-				})
-			}
-			session = &model.Session{
-				Name:    name,
-				Host:    "local",
-				SavedAt: time.Now(),
-				Tabs: []model.Tab{
-					{Title: name, Layout: "splits", Windows: windows},
-				},
-			}
-		}
-	} else if layout != "" {
-		// New session with layout template
-		layoutCfg, err := store.LoadLayout(layout)
-		if err != nil {
-			return fmt.Errorf("load layout: %w", err)
-		}
-		session = manager.LayoutToSession(layoutCfg, name, cwd)
+	if host != "" && host != "local" {
+		fmt.Printf("Killed: %s@%s\n", name, host)
 	} else {
-		// Try to load restore point, or create fresh
-		session, _ = s.Store().LoadSession(name)
-		if session == nil {
-			session = &model.Session{
-				Name:    name,
-				Host:    "local",
-				SavedAt: time.Now(),
-				Tabs: []model.Tab{
-					{Title: name, Layout: "splits", Windows: []model.Window{{CWD: cwd}}},
-				},
-			}
-		}
+		fmt.Printf("Killed: %s\n", name)
 	}
-
-	// Clear ZmxSessions before rebuilding (RestoreTab populates it)
-	session.ZmxSessions = nil
-
-	// Create windows in kitty using RestoreTab
-	kc := s.KittyClient()
-	var firstWindowID int
-	for tabIdx, tab := range session.Tabs {
-		_, windowID, err := manager.RestoreTab(kc, session, tabIdx, tab)
-		if err != nil {
-			return fmt.Errorf("restore tab: %w", err)
-		}
-		if tabIdx == 0 && windowID > 0 {
-			firstWindowID = windowID
-		}
-	}
-
-	// Focus first window
-	if firstWindowID > 0 {
-		kc.FocusWindow(firstWindowID)
-	}
-
-	fmt.Printf("Attached to session: %s\n", name)
-	return nil
-}
-
-// killSessionFromTUI kills a session (mirrors cmd/kill.go logic)
-func killSessionFromTUI(s *state.State, name string) error {
-	// Kill zmx sessions
-	zmxSessions, _ := s.SessionZmxSessions(name)
-	for _, zmxName := range zmxSessions {
-		s.ZmxClient().Kill(zmxName)
-	}
-
-	// Close kitty windows
-	windows, _ := s.GetWindowsForSession(name)
-	for _, win := range windows {
-		s.KittyClient().CloseWindow(win.ID)
-	}
-
-	// Delete save file
-	s.Store().DeleteSession(name)
-
-	fmt.Printf("Killed: %s\n", name)
 	return nil
 }

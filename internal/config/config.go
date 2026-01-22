@@ -4,15 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
-
-// DaemonConfig holds daemon-specific settings.
-type DaemonConfig struct {
-	AutoSaveInterval int `toml:"auto_save_interval"`
-}
 
 // KittyConfig holds kitty-specific settings.
 type KittyConfig struct {
@@ -32,23 +28,23 @@ type BrowserConfig struct {
 	StartPath string `toml:"start_path"` // "~", "cwd", or absolute path
 }
 
+// HostConfig holds configuration for a remote host.
+// Hosts are referenced by their SSH config alias - all auth/proxy is handled by SSH.
+type HostConfig struct {
+	ZmxPath string `toml:"zmx_path"` // optional path to zmx on remote (default: "zmx")
+}
+
 // Config holds all kmux configuration.
 type Config struct {
-	Daemon   DaemonConfig   `toml:"daemon"`
-	Kitty    KittyConfig    `toml:"kitty"`
-	Projects ProjectsConfig `toml:"projects"`
-	Browser  BrowserConfig  `toml:"browser"`
+	Kitty    KittyConfig           `toml:"kitty"`
+	Projects ProjectsConfig        `toml:"projects"`
+	Browser  BrowserConfig         `toml:"browser"`
+	Hosts    map[string]HostConfig `toml:"hosts"` // SSH alias -> host config
 }
 
 // DefaultConfig returns configuration with sensible defaults.
 func DefaultConfig() *Config {
 	return &Config{
-		Daemon: DaemonConfig{
-			AutoSaveInterval: 900,
-		},
-		Kitty: KittyConfig{
-			Socket: "/tmp/mykitty",
-		},
 		Projects: ProjectsConfig{
 			Directories: nil, // User must configure - no defaults
 			MaxDepth:    2,
@@ -79,9 +75,6 @@ func LoadConfig() (*Config, error) {
 	}
 
 	// Validate and fix invalid values
-	if cfg.Daemon.AutoSaveInterval < 1 {
-		cfg.Daemon.AutoSaveInterval = 900 // default
-	}
 	if cfg.Projects.MaxDepth < 1 {
 		cfg.Projects.MaxDepth = 2 // default
 	}
@@ -97,21 +90,6 @@ func ExpandPath(path string) string {
 		}
 	}
 	return path
-}
-
-// SocketPath returns the daemon socket path.
-func SocketPath() string {
-	if path := os.Getenv("KMUX_SOCKET"); path != "" {
-		return path
-	}
-
-	tmpDir := os.Getenv("KMUX_TMPDIR")
-	if tmpDir == "" {
-		tmpDir = "/tmp"
-	}
-
-	uid := os.Getuid()
-	return filepath.Join(tmpDir, fmt.Sprintf("kmux-%d", uid), "default")
 }
 
 // DataDir returns the data directory for session storage.
@@ -213,4 +191,28 @@ func (c *Config) BrowserStartPath() string {
 		return cwd
 	}
 	return ExpandPath(path)
+}
+
+// HostNames returns a sorted list of configured host aliases.
+func (c *Config) HostNames() []string {
+	if c.Hosts == nil {
+		return nil
+	}
+	names := make([]string, 0, len(c.Hosts))
+	for name := range c.Hosts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
+}
+
+// GetHost returns the config for a host, or nil if not configured.
+func (c *Config) GetHost(name string) *HostConfig {
+	if c.Hosts == nil {
+		return nil
+	}
+	if cfg, ok := c.Hosts[name]; ok {
+		return &cfg
+	}
+	return nil
 }

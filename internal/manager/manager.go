@@ -11,10 +11,15 @@ import (
 
 // DeriveSession creates a Session from current kitty state.
 // Uses kitty window user_vars as source of truth for session membership and zmx names.
-func DeriveSession(name string, state kitty.KittyState) *model.Session {
+// The host parameter filters windows - only windows with matching kmux_host are included.
+func DeriveSession(name, host string, state kitty.KittyState) *model.Session {
+	if host == "" {
+		host = "local"
+	}
+
 	session := &model.Session{
 		Name:    name,
-		Host:    "local",
+		Host:    host,
 		SavedAt: time.Now(),
 	}
 
@@ -32,6 +37,14 @@ func DeriveSession(name string, state kitty.KittyState) *model.Session {
 		for _, win := range tab.Windows {
 			// Use user_vars as source of truth for session membership
 			if win.UserVars["kmux_session"] != name {
+				continue
+			}
+			// Filter by host
+			winHost := win.UserVars["kmux_host"]
+			if winHost == "" {
+				winHost = "local"
+			}
+			if winHost != host {
 				continue
 			}
 			idx := len(sessionWindows)
@@ -75,7 +88,7 @@ func DeriveSession(name string, state kitty.KittyState) *model.Session {
 	return session
 }
 
-// extractCommand gets the foreground command, filtering out shells and zmx.
+// extractCommand gets the foreground command, filtering out infrastructure commands.
 func extractCommand(win kitty.Window) string {
 	if len(win.ForegroundProcesses) == 0 {
 		return ""
@@ -86,9 +99,12 @@ func extractCommand(win kitty.Window) string {
 		return ""
 	}
 
-	// Filter out shells and zmx attach
+	// Filter out shells, zmx, kitten, and ssh (these are infrastructure, not user commands)
 	cmd := fg.Cmdline[0]
-	if isShell(cmd) || cmd == "zmx" || strings.HasSuffix(cmd, "/zmx") {
+	if isShell(cmd) ||
+		cmd == "zmx" || strings.HasSuffix(cmd, "/zmx") ||
+		cmd == "kitten" || strings.HasSuffix(cmd, "/kitten") ||
+		cmd == "ssh" || strings.HasSuffix(cmd, "/ssh") {
 		return ""
 	}
 

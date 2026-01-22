@@ -42,7 +42,7 @@ func TestDeriveSession(t *testing.T) {
 		},
 	}
 
-	session := DeriveSession("myproject", state)
+	session := DeriveSession("myproject", "local", state)
 
 	if session.Name != "myproject" {
 		t.Errorf("Name = %s, want myproject", session.Name)
@@ -95,7 +95,7 @@ func TestDeriveSession_WithSplits(t *testing.T) {
 		},
 	}
 
-	session := DeriveSession("test", state)
+	session := DeriveSession("test", "local", state)
 
 	if len(session.Tabs) != 1 {
 		t.Fatalf("expected 1 tab, got %d", len(session.Tabs))

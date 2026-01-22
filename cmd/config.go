@@ -45,10 +45,8 @@ var configInitCmd = &cobra.Command{
 		}
 
 		// Write default config
-		defaultConfig := `[daemon]
-auto_save_interval = 900
-
-[kitty]
+		defaultConfig := `[kitty]
+# Socket path for kitty remote control (required if running kmux outside kitty)
 # socket = "/tmp/mykitty"
 
 [projects]

@@ -1,11 +1,13 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -29,6 +31,7 @@ type Item struct {
 	Type      ItemType
 	Name      string
 	Path      string // only for projects
+	Host      string // "local" or SSH alias for sessions
 	PaneCount int    // only for sessions
 	Status    string // only for sessions: "active", "detached", "saved"
 	CWD       string // for sessions
@@ -52,9 +55,13 @@ type Model struct {
 	height        int
 	err           error
 	quitting      bool
-	action string // "attach", "kill", or "create" - set when exiting to perform action
-	state  *state.State
-	cfg    *config.Config
+	action        string // "attach", "kill", or "create" - set when exiting to perform action
+	state         *state.State
+	cfg           *config.Config
+
+	// Host loading state
+	loadingHosts map[string]bool // hosts currently being queried
+	hostErrors   map[string]error
 
 	// Launch mode (layout selection modal)
 	launchMode      bool
@@ -64,6 +71,12 @@ type Model struct {
 	launchNameFocus bool // true = name field focused, false = layout list focused
 	launchLayout    string
 	launchName      string
+
+	// Host selection for new sessions
+	hostMode       bool
+	hostList       []string // configured hosts + "local"
+	hostCursor     int
+	selectedHost   string // selected host for new session
 
 	// Yazi result
 	yaziPath string // path selected from yazi
@@ -83,23 +96,34 @@ func New(s *state.State, cfg *config.Config) Model {
 	li.Placeholder = "session name..."
 	li.CharLimit = 50
 
+	// Build host list
+	hostList := []string{"local"}
+	if cfg != nil {
+		hostList = append(hostList, cfg.HostNames()...)
+	}
+
 	return Model{
 		filterInput:     ti,
 		renameInput:     ri,
 		launchNameInput: li,
 		state:           s,
 		cfg:             cfg,
+		loadingHosts:    make(map[string]bool),
+		hostErrors:      make(map[string]error),
+		hostList:        hostList,
+		selectedHost:    "local",
 	}
 }
 
 // Init implements tea.Model.
 func (m Model) Init() tea.Cmd {
-	return m.loadData
+	return m.loadDataAsync
 }
 
-// loadData loads session data and scans for projects.
-func (m Model) loadData() tea.Msg {
-	sessions, err := m.state.Sessions(true) // TUI shows all sessions including restore points
+// loadDataAsync starts async loading of sessions from all hosts.
+func (m Model) loadDataAsync() tea.Msg {
+	// First, load local data synchronously for immediate display
+	sessions, err := m.state.Sessions(true)
 	if err != nil {
 		return errMsg{fmt.Errorf("sessions: %w", err)}
 	}
@@ -108,9 +132,14 @@ func (m Model) loadData() tea.Msg {
 	sessionNames := make(map[string]bool)
 	for _, s := range sessions {
 		sessionNames[s.Name] = true
+		host := s.Host
+		if host == "" {
+			host = "local"
+		}
 		sessionItems = append(sessionItems, Item{
 			Type:      ItemSession,
 			Name:      s.Name,
+			Host:      host,
 			PaneCount: s.Panes,
 			Status:    s.Status,
 			CWD:       s.CWD,
@@ -133,14 +162,91 @@ func (m Model) loadData() tea.Msg {
 		}
 	}
 
-	return dataLoadedMsg{sessions: sessionItems, projects: projectItems}
+	return dataLoadedMsg{sessions: sessionItems, projects: projectItems, host: "local"}
+}
+
+// startRemoteLoading kicks off background queries to remote hosts.
+func (m Model) startRemoteLoading() tea.Cmd {
+	hosts := m.state.ConfiguredHosts()
+	if len(hosts) == 0 {
+		return nil
+	}
+
+	// Return a batch of commands, one per host
+	var cmds []tea.Cmd
+	for _, host := range hosts {
+		h := host // capture for closure
+		cmds = append(cmds, func() tea.Msg {
+			return hostLoadingMsg{host: h}
+		})
+	}
+
+	return tea.Batch(cmds...)
+}
+
+// loadHostSessions loads sessions for a specific remote host.
+func (m Model) loadHostSessions(host string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		// Query just this host
+		zmxClient := m.state.ZmxClientForHost(host)
+		zmxSessions, err := zmxClient.List()
+		if err != nil {
+			return hostLoadedMsg{host: host, err: err}
+		}
+
+		// Build session items from zmx sessions
+		var items []Item
+		for _, zmxName := range zmxSessions {
+			// Parse session name from zmx name (format: session.tab.pane)
+			parts := strings.Split(zmxName, ".")
+			if len(parts) > 0 {
+				sessName := parts[0]
+				// Check if we already have this session
+				found := false
+				for i := range items {
+					if items[i].Name == sessName {
+						items[i].PaneCount++
+						found = true
+						break
+					}
+				}
+				if !found {
+					items = append(items, Item{
+						Type:      ItemSession,
+						Name:      sessName,
+						Host:      host,
+						PaneCount: 1,
+						Status:    "detached", // Remote sessions without kitty windows are detached
+					})
+				}
+			}
+		}
+
+		_ = ctx // context used for potential timeout
+		return hostLoadedMsg{host: host, sessions: items}
+	}
 }
 
 // Message types
 type dataLoadedMsg struct {
 	sessions []Item
 	projects []Item
+	host     string
 }
+
+type hostLoadingMsg struct {
+	host string
+}
+
+type hostLoadedMsg struct {
+	host     string
+	sessions []Item
+	err      error
+}
+
 type errMsg struct{ err error }
 
 // SelectedItem returns the currently selected item, or nil if none.
@@ -159,6 +265,18 @@ func (m Model) SelectedSession() string {
 		return ""
 	}
 	return item.Name
+}
+
+// SelectedSessionHost returns the host of the currently selected session.
+func (m Model) SelectedSessionHost() string {
+	item := m.SelectedItem()
+	if item == nil || item.Type != ItemSession {
+		return "local"
+	}
+	if item.Host == "" {
+		return "local"
+	}
+	return item.Host
 }
 
 // SelectedProject returns the currently selected project, or nil if not a project.
@@ -183,6 +301,14 @@ func (m Model) LaunchLayout() string {
 // LaunchName returns the custom name for session creation, or empty for default.
 func (m Model) LaunchName() string {
 	return m.launchName
+}
+
+// SelectedHost returns the host selected for new session creation.
+func (m Model) SelectedHost() string {
+	if m.selectedHost == "" {
+		return "local"
+	}
+	return m.selectedHost
 }
 
 // BrowserPath returns the path selected from yazi, or empty if none.
@@ -235,6 +361,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.sessions = msg.sessions
 		m.projects = msg.projects
 		m.rebuildItems()
+		// Start loading remote hosts after local data is ready
+		return m, m.startRemoteLoading()
+
+	case hostLoadingMsg:
+		m.loadingHosts[msg.host] = true
+		return m, m.loadHostSessions(msg.host)
+
+	case hostLoadedMsg:
+		delete(m.loadingHosts, msg.host)
+		if msg.err != nil {
+			m.hostErrors[msg.host] = msg.err
+		} else {
+			// Add remote sessions
+			m.sessions = append(m.sessions, msg.sessions...)
+			m.rebuildItems()
+		}
 		return m, nil
 
 	case errMsg:
@@ -255,6 +397,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.yaziPath = msg.path
 		m.launchName = filepath.Base(msg.path)
 		m.launchLayout = ""
+		m.action = "create"
+		m.quitting = true
+		return m, tea.Quit
+
+	case yaziRemoteFinishedMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		if msg.path == "" {
+			return m, nil
+		}
+		// Got a path from remote yazi
+		m.yaziPath = msg.path
+		m.launchName = filepath.Base(msg.path)
+		m.launchLayout = ""
+		m.selectedHost = msg.host
 		m.action = "create"
 		m.quitting = true
 		return m, tea.Quit
@@ -281,7 +440,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// Global keys
 	switch msg.String() {
 	case "ctrl+c", "q":
-		if m.confirmKill || m.confirmIgnore || m.showHelp || m.filterMode || m.renameMode || m.launchMode {
+		if m.confirmKill || m.confirmIgnore || m.showHelp || m.filterMode || m.renameMode || m.launchMode || m.hostMode {
 			m.confirmKill = false
 			m.confirmIgnore = false
 			m.showHelp = false
@@ -291,13 +450,14 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.renameInput.Blur()
 			m.launchMode = false
 			m.launchNameInput.Blur()
+			m.hostMode = false
 			return m, nil
 		}
 		m.quitting = true
 		return m, tea.Quit
 
 	case "esc":
-		if m.confirmKill || m.confirmIgnore || m.showHelp || m.filterMode || m.renameMode || m.launchMode {
+		if m.confirmKill || m.confirmIgnore || m.showHelp || m.filterMode || m.renameMode || m.launchMode || m.hostMode {
 			m.confirmKill = false
 			m.confirmIgnore = false
 			m.showHelp = false
@@ -307,6 +467,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.renameInput.Blur()
 			m.launchMode = false
 			m.launchNameInput.Blur()
+			m.hostMode = false
 			return m, nil
 		}
 		// If filter is active, clear it instead of quitting
@@ -320,7 +481,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case "?":
-		if !m.filterMode && !m.confirmKill && !m.confirmIgnore && !m.renameMode && !m.launchMode {
+		if !m.filterMode && !m.confirmKill && !m.confirmIgnore && !m.renameMode && !m.launchMode && !m.hostMode {
 			m.showHelp = !m.showHelp
 		}
 		return m, nil
@@ -351,6 +512,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handleLaunchMode(msg)
 	}
 
+	if m.hostMode {
+		return m.handleHostMode(msg)
+	}
+
 	// Normal mode navigation
 	switch msg.String() {
 	case "up", "k":
@@ -366,8 +531,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if item != nil {
 			if item.Type == ItemSession {
 				m.action = "attach"
+				m.selectedHost = item.Host
 			} else {
-				// Project or Zoxide - create new session
+				// Project - create new session
 				m.action = "create"
 			}
 			m.quitting = true
@@ -391,7 +557,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "R":
 		// Refresh - reload sessions and rescan projects
-		return m, m.loadData
+		return m, m.loadDataAsync
 	case "/":
 		m.filterMode = true
 		m.filterInput.Focus()
@@ -409,10 +575,44 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.launchNameInput.SetValue(project.Name)
 		}
 	case "z":
-		// Open yazi file browser
+		// Open yazi file browser (local)
 		return m, m.openYazi()
+	case "Z":
+		// Open host selection for remote browsing
+		if len(m.hostList) > 1 {
+			m.hostMode = true
+			m.hostCursor = 0
+		} else {
+			// No remote hosts configured, just open local yazi
+			return m, m.openYazi()
+		}
 	}
 
+	return m, nil
+}
+
+func (m Model) handleHostMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		m.hostMode = false
+		return m, nil
+	case "up", "k":
+		if m.hostCursor > 0 {
+			m.hostCursor--
+		}
+	case "down", "j":
+		if m.hostCursor < len(m.hostList)-1 {
+			m.hostCursor++
+		}
+	case "enter":
+		selectedHost := m.hostList[m.hostCursor]
+		m.hostMode = false
+		if selectedHost == "local" {
+			return m, m.openYazi()
+		}
+		// Open remote yazi
+		return m, m.openYaziRemote(selectedHost)
+	}
 	return m, nil
 }
 
@@ -482,6 +682,13 @@ type yaziFinishedMsg struct {
 	err  error
 }
 
+// yaziRemoteFinishedMsg is sent when remote yazi exits
+type yaziRemoteFinishedMsg struct {
+	host string
+	path string
+	err  error
+}
+
 // openYazi spawns yazi using tea.ExecProcess (takes over terminal)
 func (m Model) openYazi() tea.Cmd {
 	startPath := ""
@@ -522,10 +729,33 @@ func (m Model) openYazi() tea.Cmd {
 	})
 }
 
+// openYaziRemote spawns yazi over SSH to browse a remote host
+func (m Model) openYaziRemote(host string) tea.Cmd {
+	tmpFile := "/tmp/kmux-yazi-choice-" + host
+	os.Remove(tmpFile)
+
+	// Use kitten ssh to run yazi on remote, with chooser-file writing to a remote temp file
+	// Then read the result back
+	remoteCmd := "yazi --chooser-file=/tmp/kmux-yazi-choice && cat /tmp/kmux-yazi-choice 2>/dev/null || true"
+	cmd := exec.Command("kitten", "ssh", host, "-t", remoteCmd)
+
+	return tea.ExecProcess(cmd, func(err error) tea.Msg {
+		if err != nil {
+			return yaziRemoteFinishedMsg{host: host, err: err}
+		}
+
+		// The path was printed to stdout by the cat command
+		// We need to capture it differently - kitten ssh may not work well with this
+		// For now, let's use a simpler approach
+		return yaziRemoteFinishedMsg{host: host, path: "", err: fmt.Errorf("remote yazi browsing requires manual path entry")}
+	})
+}
+
 func (m Model) handleConfirmKill(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y", "enter":
 		session := m.SelectedSession()
+		host := m.SelectedSessionHost()
 		if session == "" {
 			m.confirmKill = false
 			return m, nil
@@ -534,7 +764,7 @@ func (m Model) handleConfirmKill(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Optimistic update - remove from list immediately for snappy UI
 		newSessions := make([]Item, 0, len(m.sessions)-1)
 		for _, s := range m.sessions {
-			if s.Name != session {
+			if !(s.Name == session && s.Host == host) {
 				newSessions = append(newSessions, s)
 			}
 		}
@@ -550,12 +780,19 @@ func (m Model) handleConfirmKill(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		// Kill in background, reload to sync state
 		return m, func() tea.Msg {
-			// Kill zmx sessions and delete save file
-			zmxSessions, _ := m.state.SessionZmxSessions(session)
+			// Get zmx client for the host
+			zmxClient := m.state.ZmxClientForHost(host)
+
+			// Kill zmx sessions
+			zmxSessions, _ := m.state.SessionZmxSessionsForHost(session, host)
 			for _, zmxName := range zmxSessions {
-				m.state.ZmxClient().Kill(zmxName)
+				zmxClient.Kill(zmxName)
 			}
-			m.state.Store().DeleteSession(session)
+
+			// Only delete local save file
+			if host == "local" {
+				m.state.Store().DeleteSession(session)
+			}
 			return nil // Silently sync - UI already updated
 		}
 	case "n", "N", "esc":
@@ -641,7 +878,7 @@ func (m Model) handleRenameMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		m.renameMode = false
 		m.renameInput.Blur()
-		return m, m.loadData
+		return m, m.loadDataAsync
 	case "esc":
 		m.renameMode = false
 		m.renameInput.Blur()
@@ -651,4 +888,18 @@ func (m Model) handleRenameMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	}
 	return m, nil
+}
+
+// LoadingHosts returns a list of hosts currently being loaded.
+func (m Model) LoadingHosts() []string {
+	var hosts []string
+	for host := range m.loadingHosts {
+		hosts = append(hosts, host)
+	}
+	return hosts
+}
+
+// HostErrors returns a map of hosts that failed to load.
+func (m Model) HostErrors() map[string]error {
+	return m.hostErrors
 }

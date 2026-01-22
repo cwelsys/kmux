@@ -33,6 +33,8 @@ type SplitInfo struct {
 // windowCreator encapsulates window creation state during restore.
 type windowCreator struct {
 	k           *kitty.Client
+	zmxClient   *zmx.Client // zmx client (local or remote)
+	host        string      // "local" or SSH alias
 	session     *model.Session
 	tabIdx      int
 	tab         model.Tab
@@ -50,7 +52,7 @@ func (wc *windowCreator) createWindow(win model.Window, split SplitInfo) (int, e
 	if zmxName == "" {
 		zmxName = wc.session.ZmxSessionName(wc.tabIdx, wc.windowIdx)
 	}
-	zmxCmd := zmx.AttachCmd(zmxName, win.Command)
+	zmxCmd := wc.zmxClient.AttachCmd(zmxName, win.Command)
 
 	// Convert split type to kitty location
 	location := ""
@@ -63,18 +65,30 @@ func (wc *windowCreator) createWindow(win model.Window, split SplitInfo) (int, e
 		location = wc.tabLocation
 	}
 
+	// Build user vars
+	vars := map[string]string{
+		"kmux_zmx":     zmxName,
+		"kmux_session": wc.session.Name,
+	}
+	if wc.host != "" && wc.host != "local" {
+		vars["kmux_host"] = wc.host
+	}
+
+	// For remote hosts, use "current" CWD to preserve SSH context
+	cwd := win.CWD
+	if wc.zmxClient.IsRemote() {
+		cwd = "current"
+	}
+
 	opts := kitty.LaunchOpts{
 		Type:     launchType,
-		CWD:      win.CWD,
+		CWD:      cwd,
 		Title:    wc.tab.Title,
 		Location: location,
 		Cmd:      zmxCmd,
 		Env:      nil,
-		Vars: map[string]string{
-			"kmux_zmx":     zmxName,
-			"kmux_session": wc.session.Name,
-		},
-		Bias: split.Bias,
+		Vars:     vars,
+		Bias:     split.Bias,
 	}
 
 	id, err := wc.k.Launch(opts)
@@ -188,7 +202,9 @@ func (wc *windowCreator) restoreSubtree(node *model.SplitNode, parentSplit Split
 
 // RestoreTabOpts holds options for RestoreTab.
 type RestoreTabOpts struct {
-	TabLocation string // location for tab creation (e.g., "before" for before pinned tabs)
+	TabLocation string      // location for tab creation (e.g., "before" for before pinned tabs)
+	ZmxClient   *zmx.Client // zmx client to use (defaults to local)
+	Host        string      // host identifier for user_vars (defaults to "local")
 }
 
 // RestoreTab creates kitty windows for a tab with split layout.
@@ -201,12 +217,27 @@ func RestoreTab(
 	opts ...RestoreTabOpts,
 ) ([]WindowCreate, int, error) {
 	var tabLocation string
+	var zmxClient *zmx.Client
+	var host string
+
 	if len(opts) > 0 {
 		tabLocation = opts[0].TabLocation
+		zmxClient = opts[0].ZmxClient
+		host = opts[0].Host
+	}
+
+	// Default to local zmx client
+	if zmxClient == nil {
+		zmxClient = zmx.NewClient()
+	}
+	if host == "" {
+		host = "local"
 	}
 
 	wc := &windowCreator{
 		k:           k,
+		zmxClient:   zmxClient,
+		host:        host,
 		session:     session,
 		tabIdx:      tabIdx,
 		tab:         tab,

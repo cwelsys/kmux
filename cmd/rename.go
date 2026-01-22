@@ -8,10 +8,14 @@ import (
 	"github.com/spf13/cobra"
 )
 
+var renameHost string
+
 var renameCmd = &cobra.Command{
 	Use:   "rename <old> <new>",
 	Short: "Rename a session",
-	Long:  `Rename a session. Updates save files, ownership tracking, and kitty tab titles.`,
+	Long: `Rename a session. Updates save files, ownership tracking, and kitty tab titles.
+
+By default, renames the session across all hosts. Use --host to only rename on a specific host.`,
 	Args:  cobra.ExactArgs(2),
 	ValidArgsFunction: func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 		// Only complete the first arg (old name), not the second (new name)
@@ -50,16 +54,31 @@ var renameCmd = &cobra.Command{
 			for _, tab := range osWin.Tabs {
 				// Check if any window in this tab belongs to the old session
 				for _, win := range tab.Windows {
-					if win.UserVars["kmux_session"] == oldName {
-						kc.SetTabTitle(win.ID, newName)
-						renamedTabs++
-						break // Only rename once per tab
+					if win.UserVars["kmux_session"] != oldName {
+						continue
 					}
+					// Filter by host if specified
+					if renameHost != "" {
+						winHost := win.UserVars["kmux_host"]
+						if winHost == "" {
+							winHost = "local"
+						}
+						if winHost != renameHost {
+							continue
+						}
+					}
+					kc.SetTabTitle(win.ID, newName)
+					renamedTabs++
+					break // Only rename once per tab
 				}
 			}
 		}
 		if renamedTabs > 0 {
-			fmt.Printf("Renamed session: %s -> %s (tab titles updated, user_vars unchanged until detach/reattach)\n", oldName, newName)
+			if renameHost != "" {
+				fmt.Printf("Renamed session: %s -> %s on %s (tab titles updated, user_vars unchanged until detach/reattach)\n", oldName, newName, renameHost)
+			} else {
+				fmt.Printf("Renamed session: %s -> %s (tab titles updated, user_vars unchanged until detach/reattach)\n", oldName, newName)
+			}
 		} else {
 			fmt.Printf("Renamed session: %s -> %s\n", oldName, newName)
 		}
@@ -69,5 +88,6 @@ var renameCmd = &cobra.Command{
 }
 
 func init() {
+	renameCmd.Flags().StringVarP(&renameHost, "host", "H", "", "only rename on specific host (default: all hosts)")
 	rootCmd.AddCommand(renameCmd)
 }
