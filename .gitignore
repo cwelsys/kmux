@@ -1,2 +1,3 @@
 kmux
-
+*.md
+!*README.md
