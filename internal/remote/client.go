@@ -5,14 +5,22 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"time"
 
 	"github.com/cwel/kmux/internal/config"
 	"github.com/cwel/kmux/internal/model"
-	"github.com/cwel/kmux/internal/state"
 )
 
-// SessionInfo mirrors state.SessionInfo for JSON deserialization from remote.
-type SessionInfo = state.SessionInfo
+// SessionInfo represents a session's current state from a remote host.
+type SessionInfo struct {
+	Name           string    `json:"Name"`
+	Host           string    `json:"Host"`
+	Status         string    `json:"Status"`
+	Panes          int       `json:"Panes"`
+	IsRestorePoint bool      `json:"IsRestorePoint"`
+	CWD            string    `json:"CWD"`
+	LastSeen       time.Time `json:"LastSeen"`
+}
 
 // Client communicates with a remote kmux instance over SSH.
 type Client struct {

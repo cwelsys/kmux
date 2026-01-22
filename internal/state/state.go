@@ -12,6 +12,7 @@ import (
 	"github.com/cwel/kmux/internal/config"
 	"github.com/cwel/kmux/internal/kitty"
 	"github.com/cwel/kmux/internal/model"
+	"github.com/cwel/kmux/internal/remote"
 	"github.com/cwel/kmux/internal/store"
 	"github.com/cwel/kmux/internal/zmx"
 )
@@ -36,11 +37,12 @@ type SessionResult struct {
 
 // State provides stateless queries combining kitty, zmx, and save files.
 type State struct {
-	kitty     *kitty.Client
-	localZmx  *zmx.Client
-	remoteZmx map[string]*zmx.Client // SSH alias -> client
-	store     *store.Store
-	cfg       *config.Config
+	kitty      *kitty.Client
+	localZmx   *zmx.Client
+	remoteZmx  map[string]*zmx.Client   // SSH alias -> client
+	remoteKmux map[string]*remote.Client // SSH alias -> remote kmux client
+	store      *store.Store
+	cfg        *config.Config
 }
 
 // New creates a new State with default clients.
@@ -51,21 +53,24 @@ func New() *State {
 		socketPath = cfg.Kitty.Socket
 	}
 
-	// Build remote zmx clients from config
+	// Build remote zmx and kmux clients from config
 	remoteZmx := make(map[string]*zmx.Client)
+	remoteKmux := make(map[string]*remote.Client)
 	if cfg != nil {
 		for alias := range cfg.Hosts {
 			hostCfg := cfg.GetHost(alias)
 			remoteZmx[alias] = zmx.NewRemoteClient(alias, hostCfg)
+			remoteKmux[alias] = remote.NewClient(alias, hostCfg)
 		}
 	}
 
 	return &State{
-		kitty:     kitty.NewClientWithSocket(socketPath),
-		localZmx:  zmx.NewClient(),
-		remoteZmx: remoteZmx,
-		store:     store.DefaultStore(),
-		cfg:       cfg,
+		kitty:      kitty.NewClientWithSocket(socketPath),
+		localZmx:   zmx.NewClient(),
+		remoteZmx:  remoteZmx,
+		remoteKmux: remoteKmux,
+		store:      store.DefaultStore(),
+		cfg:        cfg,
 	}
 }
 
@@ -106,8 +111,20 @@ func (s *State) Sessions(includeRestorePoints bool) ([]SessionInfo, error) {
 	return s.sessionsForHost("local", includeRestorePoints)
 }
 
+// RemoteKmuxClient returns the remote kmux client for a given host.
+func (s *State) RemoteKmuxClient(host string) *remote.Client {
+	if client, ok := s.remoteKmux[host]; ok {
+		return client
+	}
+	return nil
+}
+
 // sessionsForHost returns sessions for a specific host.
 func (s *State) sessionsForHost(host string, includeRestorePoints bool) ([]SessionInfo, error) {
+	if host != "local" {
+		return s.remoteSessionsForHost(host, includeRestorePoints)
+	}
+
 	if s == nil {
 		return nil, fmt.Errorf("state is nil")
 	}
@@ -284,6 +301,81 @@ func (s *State) sessionsForHost(host string, includeRestorePoints bool) ([]Sessi
 	}
 
 	return sessions, zmxErr
+}
+
+// remoteSessionsForHost returns sessions for a remote host using the remote kmux client.
+// Local kitty state is checked to determine which sessions are "active" from our perspective.
+func (s *State) remoteSessionsForHost(host string, includeRestorePoints bool) ([]SessionInfo, error) {
+	client := s.remoteKmux[host]
+	if client == nil {
+		return nil, fmt.Errorf("no kmux client for host: %s", host)
+	}
+
+	// Get sessions from remote kmux
+	remoteSessions, err := client.ListSessions()
+	if err != nil {
+		return nil, err
+	}
+
+	// Check local kitty state for active windows on this host
+	kittyState, _ := s.kitty.GetState()
+	activeOnHost := make(map[string]int) // session name -> window count
+	for _, osWin := range kittyState {
+		for _, tab := range osWin.Tabs {
+			for _, win := range tab.Windows {
+				if win.UserVars["kmux_host"] == host && win.UserVars["kmux_session"] != "" {
+					activeOnHost[win.UserVars["kmux_session"]]++
+				}
+			}
+		}
+	}
+
+	// Merge: override status based on local kitty windows
+	var sessions []SessionInfo
+	for _, rs := range remoteSessions {
+		if !includeRestorePoints && rs.Status == "saved" {
+			continue
+		}
+		sess := SessionInfo{
+			Name:           rs.Name,
+			Host:           host,
+			Status:         rs.Status,
+			Panes:          rs.Panes,
+			IsRestorePoint: rs.IsRestorePoint,
+			CWD:            rs.CWD,
+			LastSeen:       rs.LastSeen,
+		}
+		if panes, active := activeOnHost[sess.Name]; active {
+			sess.Status = "active"
+			sess.Panes = panes
+		} else if sess.Status == "active" {
+			// Remote says active (has kitty windows on remote) but we don't have local windows
+			// From our perspective, it's detached (zmx running, no windows here)
+			sess.Status = "detached"
+		}
+		sessions = append(sessions, sess)
+	}
+
+	// Also include sessions that have local windows but remote doesn't know about
+	for name, panes := range activeOnHost {
+		found := false
+		for _, sess := range sessions {
+			if sess.Name == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			sessions = append(sessions, SessionInfo{
+				Name:   name,
+				Host:   host,
+				Status: "active",
+				Panes:  panes,
+			})
+		}
+	}
+
+	return sessions, nil
 }
 
 // SessionsAsync returns a channel that receives session results as hosts respond.
