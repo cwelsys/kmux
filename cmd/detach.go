@@ -83,9 +83,18 @@ Use --host to specify which host's session to detach (default: auto-detect or "l
 		// Derive session from current state using user_vars (filtered by host)
 		session := manager.DeriveSession(sessionName, host, kittyState)
 
-		// Save session
-		if err := st.SaveSession(session); err != nil {
-			return fmt.Errorf("save session: %w", err)
+		// Save session to the appropriate host
+		if host != "local" {
+			remoteClient := s.RemoteKmuxClient(host)
+			if remoteClient != nil {
+				if err := remoteClient.SaveSession(session); err != nil {
+					return fmt.Errorf("save remote session: %w", err)
+				}
+			}
+		} else {
+			if err := st.SaveSession(session); err != nil {
+				return fmt.Errorf("save session: %w", err)
+			}
 		}
 
 		// Close windows belonging to this session AND host
