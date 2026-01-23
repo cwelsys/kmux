@@ -5,6 +5,7 @@ import (
 
 	"github.com/cwel/kmux/internal/kitty"
 	"github.com/cwel/kmux/internal/state"
+	"github.com/cwel/kmux/internal/zmx"
 	"github.com/spf13/cobra"
 )
 
@@ -50,10 +51,11 @@ The --cwd flag controls the working directory. Special values:
 		s := state.New()
 		k := s.KittyClient()
 
-		// Find session/host from focused window's user_vars
+		// Find session/host/cwd from focused window's user_vars
 		// Note: We query kitty state directly instead of using KITTY_WINDOW_ID env
 		// because --copy-env doesn't work on macOS (KERN_PROCARGS2 is empty for shells)
 		var host string
+		var remoteCWD string
 		if sessionName == "" {
 			kittyState, err := k.GetState()
 			if err == nil {
@@ -72,6 +74,7 @@ The --cwd flag controls the working directory. Special values:
 							}
 							sessionName = win.UserVars["kmux_session"]
 							host = win.UserVars["kmux_host"]
+							remoteCWD = win.UserVars["REMOTE_CWD"]
 							break
 						}
 						break
@@ -133,7 +136,13 @@ The --cwd flag controls the working directory. Special values:
 
 		// Get the zmx client for this host and build attach command
 		zmxClient := s.ZmxClientForHost(host)
-		zmxCmd := zmxClient.AttachCmd(zmxName)
+		var zmxCmd []string
+		if zmxClient.IsRemote() && remoteCWD != "" {
+			// Use REMOTE_CWD user var (set by shell integration on remote)
+			zmxCmd = zmxClient.AttachCmd(zmxName, zmx.CWDCommand(remoteCWD))
+		} else {
+			zmxCmd = zmxClient.AttachCmd(zmxName)
+		}
 
 		// Launch the split window with zmx and user_vars
 		vars := map[string]string{

@@ -56,7 +56,7 @@ func (wc *windowCreator) createWindow(win model.Window, split SplitInfo) (int, e
 	// For remote sessions with a CWD but no command, start the shell in that directory
 	command := win.Command
 	if wc.zmxClient.IsRemote() && win.CWD != "" && command == "" {
-		command = "cd '" + win.CWD + "' && exec $SHELL"
+		command = zmx.CWDCommand(win.CWD)
 	}
 	zmxCmd := wc.zmxClient.AttachCmd(zmxName, command)
 

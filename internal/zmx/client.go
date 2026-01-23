@@ -132,6 +132,21 @@ func (c *Client) Kill(name string) error {
 	return nil
 }
 
+// CWDCommand returns a shell command that cd's to the given directory.
+// Used for remote sessions where kitty's --cwd doesn't apply across SSH.
+// Uses ; instead of && so the shell starts even if the path doesn't exist.
+func CWDCommand(cwd string) string {
+	if strings.HasPrefix(cwd, "~/") {
+		// Use $HOME for tilde paths (~ doesn't expand inside quotes)
+		return "cd $HOME" + cwd[1:] + " 2>/dev/null; exec $SHELL"
+	}
+	if cwd == "~" {
+		return "cd $HOME 2>/dev/null; exec $SHELL"
+	}
+	// Absolute paths: single-quote to protect spaces
+	return "cd '" + cwd + "' 2>/dev/null; exec $SHELL"
+}
+
 // AttachCmd returns the command to attach to a zmx session.
 // For local: ["zmx", "attach", name, ...]
 // For remote: ["kitten", "ssh", host, "-t", "zmx", "attach", name, ...]
