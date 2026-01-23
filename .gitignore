@@ -1,4 +1,4 @@
-kmux
+kmux*
 *.md
 !*README.md
 docs/
