@@ -10,17 +10,13 @@ import (
 )
 
 // Uses ANSI terminal colors (0-15) so output adapts to the user's terminal theme.
+// Styling mirrors charmbracelet/fang's AnsiColorScheme.
 var (
-	helpTitleStyle = lipgloss.NewStyle().
-			Bold(true).
-			Foreground(lipgloss.Color("4")) // terminal blue
-
 	helpDescStyle = lipgloss.NewStyle()
 
 	helpSectionStyle = lipgloss.NewStyle().
 				Bold(true).
-				Foreground(lipgloss.Color("8")). // bright black (dim)
-				MarginTop(1)
+				Foreground(lipgloss.Color("4")) // terminal blue (matches fang sections)
 
 	helpCmdNameStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("6")) // terminal cyan
@@ -28,39 +24,34 @@ var (
 	helpCmdDescStyle = lipgloss.NewStyle()
 
 	helpFlagStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("6")) // terminal cyan
+			Foreground(lipgloss.Color("5")) // terminal magenta
 
 	helpFlagDescStyle = lipgloss.NewStyle()
 
-	helpDimStyle = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("8")) // bright black (dim)
+	helpFlagDefaultStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("13")) // bright magenta
 )
 
 func styledHelp(cmd *cobra.Command, _ []string) {
 	var b strings.Builder
 
-	// Title
-	b.WriteString(helpTitleStyle.Render(cmd.Name()))
-	b.WriteString("\n\n")
-
-	// Description
+	// Description (fang leads with description, not the command name)
 	desc := cmd.Long
 	if desc == "" {
 		desc = cmd.Short
 	}
 	if desc != "" {
-		b.WriteString(helpDescStyle.Render(desc))
+		b.WriteString("\n  " + helpDescStyle.Render(desc))
 		b.WriteString("\n")
 	}
 
 	// Usage
-	b.WriteString(helpSectionStyle.Render("USAGE"))
-	b.WriteString("\n")
+	b.WriteString("\n  " + helpSectionStyle.Render("USAGE") + "\n\n")
 	usageLine := cmd.UseLine()
 	if cmd.HasAvailableSubCommands() {
 		usageLine = cmd.CommandPath() + " [command] [flags]"
 	}
-	b.WriteString("  " + helpDimStyle.Render(usageLine))
+	b.WriteString("    " + usageLine)
 	b.WriteString("\n")
 
 	// Commands
@@ -73,8 +64,7 @@ func styledHelp(cmd *cobra.Command, _ []string) {
 	}
 
 	if len(visible) > 0 {
-		b.WriteString(helpSectionStyle.Render("COMMANDS"))
-		b.WriteString("\n")
+		b.WriteString("\n  " + helpSectionStyle.Render("COMMANDS") + "\n\n")
 
 		// Find max command name length for alignment
 		maxLen := 0
@@ -85,7 +75,7 @@ func styledHelp(cmd *cobra.Command, _ []string) {
 		}
 
 		for _, c := range visible {
-			name := helpCmdNameStyle.Render(fmt.Sprintf("  %-*s", maxLen+2, c.Name()))
+			name := helpCmdNameStyle.Render(fmt.Sprintf("    %-*s", maxLen+2, c.Name()))
 			desc := helpCmdDescStyle.Render(c.Short)
 			b.WriteString(name + desc + "\n")
 		}
@@ -94,8 +84,7 @@ func styledHelp(cmd *cobra.Command, _ []string) {
 	// Flags
 	flags := cmd.Flags()
 	if flags.HasAvailableFlags() {
-		b.WriteString(helpSectionStyle.Render("FLAGS"))
-		b.WriteString("\n")
+		b.WriteString("\n  " + helpSectionStyle.Render("FLAGS") + "\n\n")
 
 		// Collect flags and find max length for alignment
 		type flagEntry struct {
@@ -111,17 +100,14 @@ func styledHelp(cmd *cobra.Command, _ []string) {
 			}
 			var nameStr string
 			if f.Shorthand != "" {
-				nameStr = fmt.Sprintf("-%s, --%s", f.Shorthand, f.Name)
+				nameStr = fmt.Sprintf("-%s --%s", f.Shorthand, f.Name)
 			} else {
 				nameStr = fmt.Sprintf("    --%s", f.Name)
-			}
-			if f.Value.Type() != "bool" {
-				nameStr += " " + f.Value.Type()
 			}
 
 			desc := f.Usage
 			if f.DefValue != "" && f.DefValue != "false" && f.DefValue != "[]" {
-				desc += helpDimStyle.Render(fmt.Sprintf(" (default: %s)", f.DefValue))
+				desc += " " + helpFlagDefaultStyle.Render(fmt.Sprintf("(%s)", f.DefValue))
 			}
 
 			if len(nameStr) > maxLen {
@@ -131,16 +117,9 @@ func styledHelp(cmd *cobra.Command, _ []string) {
 		})
 
 		for _, e := range entries {
-			name := helpFlagStyle.Render(fmt.Sprintf("  %-*s", maxLen+2, e.name))
+			name := helpFlagStyle.Render(fmt.Sprintf("    %-*s", maxLen+2, e.name))
 			b.WriteString(name + helpFlagDescStyle.Render(e.desc) + "\n")
 		}
-	}
-
-	// Footer
-	if cmd.HasAvailableSubCommands() {
-		b.WriteString("\n")
-		b.WriteString(helpDimStyle.Render(fmt.Sprintf("Use \"%s [command] --help\" for more information.", cmd.CommandPath())))
-		b.WriteString("\n")
 	}
 
 	fmt.Print(b.String())
