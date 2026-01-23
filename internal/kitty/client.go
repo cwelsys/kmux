@@ -91,6 +91,14 @@ func resolveSocket(configured string) string {
 	return configured
 }
 
+// wrapErr adds context-appropriate hints to kitty remote control errors.
+func (c *Client) wrapErr(subcmd string, err error, stderr string) error {
+	if c.useKitten {
+		return fmt.Errorf("kitten @ %s: %w: %s\n(hint: ensure allow_remote_control is not 'socket-only' in kitty.conf)", subcmd, err, stderr)
+	}
+	return fmt.Errorf("kitty @ %s: %w: %s", subcmd, err, stderr)
+}
+
 // kittyCmd builds an exec.Cmd for a kitty remote control command.
 // In kitten mode: kitten @ <args...>
 // In socket mode: kitty @ [--to unix:<socket>] <args...>
@@ -125,7 +133,7 @@ func (c *Client) GetState() (KittyState, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("kitty @ ls: %w: %s", err, stderr.String())
+		return nil, c.wrapErr("ls", err, stderr.String())
 	}
 
 	return ParseState(stdout.Bytes())
@@ -168,7 +176,7 @@ func (c *Client) Launch(opts LaunchOpts) (int, error) {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return 0, fmt.Errorf("kitty @ launch: %w: %s", err, stderr.String())
+		return 0, c.wrapErr("launch", err, stderr.String())
 	}
 
 	// Parse window ID from output
@@ -198,7 +206,7 @@ func (c *Client) FocusWindow(id int) error {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("kitty @ focus-window: %w: %s", err, stderr.String())
+		return c.wrapErr("focus-window", err, stderr.String())
 	}
 	return nil
 }
@@ -210,7 +218,7 @@ func (c *Client) CloseWindow(id int) error {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("kitty @ close-window: %w: %s", err, stderr.String())
+		return c.wrapErr("close-window", err, stderr.String())
 	}
 	return nil
 }
@@ -222,7 +230,7 @@ func (c *Client) CloseTab(id int) error {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("kitty @ close-tab: %w: %s", err, stderr.String())
+		return c.wrapErr("close-tab", err, stderr.String())
 	}
 	return nil
 }
@@ -234,7 +242,7 @@ func (c *Client) GotoLayout(layout string) error {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("kitty @ goto-layout: %w: %s", err, stderr.String())
+		return c.wrapErr("goto-layout", err, stderr.String())
 	}
 	return nil
 }
@@ -246,7 +254,7 @@ func (c *Client) SetTabTitle(windowID int, title string) error {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("kitty @ set-tab-title: %w: %s", err, stderr.String())
+		return c.wrapErr("set-tab-title", err, stderr.String())
 	}
 	return nil
 }
@@ -258,7 +266,7 @@ func (c *Client) FocusTab(windowID int) error {
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("kitty @ focus-tab: %w: %s", err, stderr.String())
+		return c.wrapErr("focus-tab", err, stderr.String())
 	}
 	return nil
 }

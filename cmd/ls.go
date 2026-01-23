@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"text/tabwriter"
@@ -14,6 +15,7 @@ import (
 var (
 	lsAll   bool
 	lsLocal bool
+	lsJSON  bool
 )
 
 var lsCmd = &cobra.Command{
@@ -28,10 +30,8 @@ var lsCmd = &cobra.Command{
 		var err error
 
 		if lsLocal {
-			// Local only mode
 			sessions, err = s.Sessions(lsAll)
 		} else {
-			// Query all configured hosts
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			sessions, err = s.AllSessions(ctx, lsAll)
@@ -41,40 +41,53 @@ var lsCmd = &cobra.Command{
 			return err
 		}
 
+		if lsJSON {
+			return printSessionsJSON(sessions)
+		}
+
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-
-		// Check if we have any remote sessions
-		hasRemote := false
+		fmt.Fprintln(w, "SESSION\tHOST\tSTATUS\tPANES")
 		for _, sess := range sessions {
-			if sess.Host != "local" {
-				hasRemote = true
-				break
+			host := sess.Host
+			if host == "" {
+				host = "local"
 			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%d\n", sess.Name, host, sess.Status, sess.Panes)
 		}
-
-		if hasRemote {
-			fmt.Fprintln(w, "SESSION\tHOST\tSTATUS\tPANES")
-			for _, sess := range sessions {
-				host := sess.Host
-				if host == "" {
-					host = "local"
-				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%d\n", sess.Name, host, sess.Status, sess.Panes)
-			}
-		} else {
-			fmt.Fprintln(w, "SESSION\tSTATUS\tPANES")
-			for _, sess := range sessions {
-				fmt.Fprintf(w, "%s\t%s\t%d\n", sess.Name, sess.Status, sess.Panes)
-			}
-		}
-
 		w.Flush()
 		return nil
 	},
 }
 
+type sessionJSON struct {
+	Name   string `json:"name"`
+	Host   string `json:"host"`
+	Status string `json:"status"`
+	Panes  int    `json:"panes"`
+}
+
+func printSessionsJSON(sessions []state.SessionInfo) error {
+	out := make([]sessionJSON, len(sessions))
+	for i, s := range sessions {
+		host := s.Host
+		if host == "" {
+			host = "local"
+		}
+		out[i] = sessionJSON{
+			Name:   s.Name,
+			Host:   host,
+			Status: s.Status,
+			Panes:  s.Panes,
+		}
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
+}
+
 func init() {
 	lsCmd.Flags().BoolVarP(&lsAll, "all", "a", false, "Include restore points (saved sessions without running zmx)")
 	lsCmd.Flags().BoolVarP(&lsLocal, "local", "L", false, "Only show local sessions (skip remote hosts)")
+	lsCmd.Flags().BoolVar(&lsJSON, "json", false, "Output as JSON")
 	rootCmd.AddCommand(lsCmd)
 }
