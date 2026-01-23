@@ -1,6 +1,7 @@
 package manager
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/cwel/kmux/internal/kitty"
@@ -159,7 +160,8 @@ type KillOpts struct {
 }
 
 // KillSession terminates a session completely.
-// Comprehensively collects zmx from: save file, naming convention, kitty user_vars.
+// For remote hosts: closes local kitty windows, delegates zmx+save cleanup to remote kmux.
+// For local: comprehensively collects zmx from save file, naming convention, kitty user_vars.
 func KillSession(s *state.State, opts KillOpts) error {
 	host := opts.Host
 	if host == "" {
@@ -167,10 +169,42 @@ func KillSession(s *state.State, opts KillOpts) error {
 	}
 
 	k := s.KittyClient()
+
+	// Get kitty state to find windows for this session
+	kittyState, _ := k.GetState()
+
+	// Close local kitty windows for this session on this host
+	for _, osWin := range kittyState {
+		for _, tab := range osWin.Tabs {
+			for _, win := range tab.Windows {
+				if win.UserVars["kmux_session"] != opts.Name {
+					continue
+				}
+				winHost := win.UserVars["kmux_host"]
+				if winHost == "" {
+					winHost = "local"
+				}
+				if winHost != host {
+					continue
+				}
+				k.CloseWindow(win.ID)
+			}
+		}
+	}
+
+	if host != "local" {
+		// Delegate zmx kill + save file cleanup to remote kmux
+		client := s.RemoteKmuxClient(host)
+		if client == nil {
+			return fmt.Errorf("no kmux client for host: %s", host)
+		}
+		return client.Kill(opts.Name)
+	}
+
+	// Local: existing comprehensive kill logic
 	zmxClient := s.ZmxClientForHost(host)
 	st := s.Store()
 
-	// Collect zmx sessions to kill from save file and naming convention
 	zmxToKill := make(map[string]bool)
 
 	// Check save file first
@@ -195,41 +229,24 @@ func KillSession(s *state.State, opts KillOpts) error {
 		}
 	}
 
-	// Get kitty state to find windows for this session
-	kittyState, _ := k.GetState()
-
-	// Close windows (filtered by host) and collect any zmx names from user_vars
+	// Collect zmx names from kitty user_vars (windows already closed above)
 	for _, osWin := range kittyState {
 		for _, tab := range osWin.Tabs {
 			for _, win := range tab.Windows {
-				if win.UserVars["kmux_session"] != opts.Name {
-					continue
+				if win.UserVars["kmux_session"] == opts.Name {
+					if zmxName := win.UserVars["kmux_zmx"]; zmxName != "" {
+						zmxToKill[zmxName] = true
+					}
 				}
-				winHost := win.UserVars["kmux_host"]
-				if winHost == "" {
-					winHost = "local"
-				}
-				if winHost != host {
-					continue
-				}
-				// Add zmx name if present
-				if zmxName := win.UserVars["kmux_zmx"]; zmxName != "" {
-					zmxToKill[zmxName] = true
-				}
-				// Close the kitty window
-				k.CloseWindow(win.ID)
 			}
 		}
 	}
 
-	// Kill all zmx sessions for this session (using the correct host's zmx client)
 	for zmxName := range zmxToKill {
 		zmxClient.Kill(zmxName)
 	}
 
-	// Delete saved session (save files are always stored locally)
 	st.DeleteSession(opts.Name)
-
 	return nil
 }
 
