@@ -35,7 +35,6 @@ func AttachSession(s *state.State, opts AttachOpts) (*AttachResult, error) {
 	}
 
 	k := s.KittyClient()
-	st := s.Store()
 	zmxClient := s.ZmxClientForHost(host)
 
 	// Check if session is already active (on this host)
@@ -58,7 +57,7 @@ func AttachSession(s *state.State, opts AttachOpts) (*AttachResult, error) {
 
 	if len(zmxSessions) > 0 {
 		// Detached session - reattach to running zmx
-		session = loadSessionForHost(st, opts.Name, host)
+		session = loadSessionFromHost(s, opts.Name, host)
 
 		if session == nil {
 			// No save file (or wrong host) - create layout with windows for each zmx session
@@ -88,7 +87,7 @@ func AttachSession(s *state.State, opts AttachOpts) (*AttachResult, error) {
 		session.Host = host
 	} else {
 		// Try to load restore point, or create fresh
-		session = loadSessionForHost(st, opts.Name, host)
+		session = loadSessionFromHost(s, opts.Name, host)
 		if session == nil {
 			session = &model.Session{
 				Name:    opts.Name,
@@ -232,6 +231,26 @@ func KillSession(s *state.State, opts KillOpts) error {
 	st.DeleteSession(opts.Name)
 
 	return nil
+}
+
+// loadSessionFromHost loads a session from the appropriate host.
+// For local: reads local store. For remote: fetches via SSH.
+func loadSessionFromHost(s *state.State, name, host string) *model.Session {
+	if host == "local" {
+		return loadSessionForHost(s.Store(), name, host)
+	}
+
+	client := s.RemoteKmuxClient(host)
+	if client == nil {
+		return nil
+	}
+
+	session, err := client.GetSession(name)
+	if err != nil {
+		return nil
+	}
+
+	return session
 }
 
 // loadSessionForHost loads a save file only if its Host matches the target host.
