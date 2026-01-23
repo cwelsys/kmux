@@ -254,7 +254,19 @@ func KillSession(s *state.State, opts KillOpts) error {
 // For local: reads local store. For remote: fetches via SSH.
 func loadSessionFromHost(s *state.State, name, host string) *model.Session {
 	if host == "local" {
-		return loadSessionForHost(s.Store(), name, host)
+		session, err := s.Store().LoadSession(name)
+		if err != nil || session == nil {
+			return nil
+		}
+		// Only return if save file is for local host
+		savedHost := session.Host
+		if savedHost == "" {
+			savedHost = "local"
+		}
+		if savedHost != "local" {
+			return nil
+		}
+		return session
 	}
 
 	client := s.RemoteKmuxClient(host)
@@ -264,25 +276,6 @@ func loadSessionFromHost(s *state.State, name, host string) *model.Session {
 
 	session, err := client.GetSession(name)
 	if err != nil {
-		return nil
-	}
-
-	return session
-}
-
-// loadSessionForHost loads a save file only if its Host matches the target host.
-// Returns nil if no save file exists or if the save file is for a different host.
-func loadSessionForHost(st *store.Store, name, host string) *model.Session {
-	session, err := st.LoadSession(name)
-	if err != nil || session == nil {
-		return nil
-	}
-
-	savedHost := session.Host
-	if savedHost == "" {
-		savedHost = "local"
-	}
-	if savedHost != host {
 		return nil
 	}
 
