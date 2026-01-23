@@ -10,20 +10,60 @@ import (
 )
 
 // Client communicates with kitty via `kitty @` commands.
+// On remote hosts (connected via kitten ssh), it falls back to `kitten @`
+// which uses TTY-based DCS escape sequences instead of a unix socket.
 type Client struct {
 	socketPath string // Socket path from config, or empty to use kitty's default discovery
+	useKitten  bool   // Use `kitten @` TTY-based remote control (for kitten ssh remotes)
+	kittenPath string // Path to kitten binary (when useKitten is true)
 }
 
 // NewClient creates a new kitty client with no socket path.
 // Use NewClientWithSocket to specify the socket from config.
 func NewClient() *Client {
-	return &Client{}
+	return newClient("")
 }
 
 // NewClientWithSocket creates a client with an explicit socket path.
 // The socket is resolved using environment and filesystem checks.
 func NewClientWithSocket(socketPath string) *Client {
-	return &Client{socketPath: resolveSocket(socketPath)}
+	return newClient(socketPath)
+}
+
+// newClient creates a client, falling back to kitten @ if no valid socket is available
+// and we detect we're on a remote host via kitten ssh.
+func newClient(socketPath string) *Client {
+	resolved := resolveSocket(socketPath)
+
+	// Check if the resolved socket is actually usable
+	if hasValidSocket(resolved) {
+		return &Client{socketPath: resolved}
+	}
+
+	// No valid socket — check if we're on a kitten ssh remote.
+	// Detection uses kitty's own heuristic (shell-integration/zsh/kitty-integration):
+	// KITTY_WINDOW_ID set + KITTY_PID not set = connected via kitten ssh.
+	if os.Getenv("KITTY_WINDOW_ID") != "" && os.Getenv("KITTY_PID") == "" {
+		if kittenPath, err := exec.LookPath("kitten"); err == nil {
+			return &Client{useKitten: true, kittenPath: kittenPath}
+		}
+	}
+
+	// Fallback: use socket as-is (will error from kitty if invalid)
+	return &Client{socketPath: resolved}
+}
+
+// hasValidSocket checks if a resolved socket path is actually reachable.
+func hasValidSocket(resolved string) bool {
+	if os.Getenv("KITTY_LISTEN_ON") != "" {
+		return true
+	}
+	if resolved != "" {
+		if _, err := os.Stat(resolved); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // resolveSocket determines the actual kitty socket path.
@@ -51,6 +91,23 @@ func resolveSocket(configured string) string {
 	return configured
 }
 
+// kittyCmd builds an exec.Cmd for a kitty remote control command.
+// In kitten mode: kitten @ <args...>
+// In socket mode: kitty @ [--to unix:<socket>] <args...>
+func (c *Client) kittyCmd(args ...string) *exec.Cmd {
+	if c.useKitten {
+		fullArgs := append([]string{"@"}, args...)
+		return exec.Command(c.kittenPath, fullArgs...)
+	}
+
+	fullArgs := []string{"@"}
+	if c.socketPath != "" {
+		fullArgs = append(fullArgs, "--to", "unix:"+c.socketPath)
+	}
+	fullArgs = append(fullArgs, args...)
+	return exec.Command("kitty", fullArgs...)
+}
+
 // ParseState parses JSON output from `kitty @ ls`.
 func ParseState(data []byte) (KittyState, error) {
 	var state KittyState
@@ -62,12 +119,7 @@ func ParseState(data []byte) (KittyState, error) {
 
 // GetState retrieves the current kitty state.
 func (c *Client) GetState() (KittyState, error) {
-	args := []string{"@", "ls"}
-	if c.socketPath != "" {
-		args = []string{"@", "--to", "unix:" + c.socketPath, "ls"}
-	}
-
-	cmd := exec.Command("kitty", args...)
+	cmd := c.kittyCmd("ls")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -81,11 +133,7 @@ func (c *Client) GetState() (KittyState, error) {
 
 // Launch creates a new window/tab in kitty.
 func (c *Client) Launch(opts LaunchOpts) (int, error) {
-	args := []string{"@"}
-	if c.socketPath != "" {
-		args = append(args, "--to", "unix:"+c.socketPath)
-	}
-	args = append(args, "launch")
+	args := []string{"launch"}
 
 	if opts.Type != "" {
 		args = append(args, "--type", opts.Type)
@@ -114,7 +162,7 @@ func (c *Client) Launch(opts LaunchOpts) (int, error) {
 		args = append(args, opts.Cmd...)
 	}
 
-	cmd := exec.Command("kitty", args...)
+	cmd := c.kittyCmd(args...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -145,13 +193,7 @@ type LaunchOpts struct {
 
 // FocusWindow focuses a window by ID.
 func (c *Client) FocusWindow(id int) error {
-	args := []string{"@"}
-	if c.socketPath != "" {
-		args = append(args, "--to", "unix:"+c.socketPath)
-	}
-	args = append(args, "focus-window", "--match", fmt.Sprintf("id:%d", id))
-
-	cmd := exec.Command("kitty", args...)
+	cmd := c.kittyCmd("focus-window", "--match", fmt.Sprintf("id:%d", id))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -163,13 +205,7 @@ func (c *Client) FocusWindow(id int) error {
 
 // CloseWindow closes a window by ID.
 func (c *Client) CloseWindow(id int) error {
-	args := []string{"@"}
-	if c.socketPath != "" {
-		args = append(args, "--to", "unix:"+c.socketPath)
-	}
-	args = append(args, "close-window", "--match", fmt.Sprintf("id:%d", id))
-
-	cmd := exec.Command("kitty", args...)
+	cmd := c.kittyCmd("close-window", "--match", fmt.Sprintf("id:%d", id))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -181,13 +217,7 @@ func (c *Client) CloseWindow(id int) error {
 
 // CloseTab closes a tab by ID.
 func (c *Client) CloseTab(id int) error {
-	args := []string{"@"}
-	if c.socketPath != "" {
-		args = append(args, "--to", "unix:"+c.socketPath)
-	}
-	args = append(args, "close-tab", "--match", fmt.Sprintf("id:%d", id))
-
-	cmd := exec.Command("kitty", args...)
+	cmd := c.kittyCmd("close-tab", "--match", fmt.Sprintf("id:%d", id))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -199,13 +229,7 @@ func (c *Client) CloseTab(id int) error {
 
 // GotoLayout changes the layout of the active tab.
 func (c *Client) GotoLayout(layout string) error {
-	args := []string{"@"}
-	if c.socketPath != "" {
-		args = append(args, "--to", "unix:"+c.socketPath)
-	}
-	args = append(args, "goto-layout", layout)
-
-	cmd := exec.Command("kitty", args...)
+	cmd := c.kittyCmd("goto-layout", layout)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -217,13 +241,7 @@ func (c *Client) GotoLayout(layout string) error {
 
 // SetTabTitle sets the title of a tab by matching a window ID in that tab.
 func (c *Client) SetTabTitle(windowID int, title string) error {
-	args := []string{"@"}
-	if c.socketPath != "" {
-		args = append(args, "--to", "unix:"+c.socketPath)
-	}
-	args = append(args, "set-tab-title", "--match", fmt.Sprintf("id:%d", windowID), title)
-
-	cmd := exec.Command("kitty", args...)
+	cmd := c.kittyCmd("set-tab-title", "--match", fmt.Sprintf("id:%d", windowID), title)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -235,13 +253,7 @@ func (c *Client) SetTabTitle(windowID int, title string) error {
 
 // FocusTab focuses a tab by matching a window ID in that tab.
 func (c *Client) FocusTab(windowID int) error {
-	args := []string{"@"}
-	if c.socketPath != "" {
-		args = append(args, "--to", "unix:"+c.socketPath)
-	}
-	args = append(args, "focus-tab", "--match", fmt.Sprintf("id:%d", windowID))
-
-	cmd := exec.Command("kitty", args...)
+	cmd := c.kittyCmd("focus-tab", "--match", fmt.Sprintf("id:%d", windowID))
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
