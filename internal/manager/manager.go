@@ -85,6 +85,15 @@ func DeriveSession(name, host string, state kitty.KittyState) *model.Session {
 		session.Tabs = append(session.Tabs, modelTab)
 	}
 
+	// Collect zmx session names for fast reattach (avoids querying zmx list)
+	for _, tab := range session.Tabs {
+		for _, win := range tab.Windows {
+			if win.ZmxName != "" {
+				session.ZmxSessions = append(session.ZmxSessions, win.ZmxName)
+			}
+		}
+	}
+
 	return session
 }
 
