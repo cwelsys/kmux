@@ -284,9 +284,12 @@ func (m Model) viewConfirmIgnore(width, height int) string {
 func (m Model) viewHostModal(width, height int) string {
 	var b strings.Builder
 
-	b.WriteString(previewTitleStyle.Render("Select Host") + "\n\n")
+	b.WriteString(previewTitleStyle.Render("Select Remote Host") + "\n\n")
 
 	for i, host := range m.hostList {
+		if host == "local" {
+			continue // Skip local — z already handles it
+		}
 		indicator := "○"
 		if i == m.hostCursor {
 			indicator = "●"

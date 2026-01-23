@@ -578,13 +578,18 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// Open yazi file browser (local)
 		return m, m.openYazi()
 	case "Z":
-		// Open host selection for remote browsing
-		if len(m.hostList) > 1 {
-			m.hostMode = true
-			m.hostCursor = 0
+		// Open remote browsing
+		remoteHosts := m.hostList[1:] // Skip "local" (index 0) — z already handles local
+		if len(remoteHosts) == 0 {
+			// No remote hosts configured
+			return m, nil
+		} else if len(remoteHosts) == 1 {
+			// Single remote host — skip modal
+			return m, m.openYaziRemote(remoteHosts[0])
 		} else {
-			// No remote hosts configured, just open local yazi
-			return m, m.openYazi()
+			// Multiple remote hosts — show selector (skip "local")
+			m.hostMode = true
+			m.hostCursor = 1
 		}
 	}
 
@@ -597,7 +602,7 @@ func (m Model) handleHostMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.hostMode = false
 		return m, nil
 	case "up", "k":
-		if m.hostCursor > 0 {
+		if m.hostCursor > 1 { // Skip "local" at index 0
 			m.hostCursor--
 		}
 	case "down", "j":
@@ -607,10 +612,6 @@ func (m Model) handleHostMode(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "enter":
 		selectedHost := m.hostList[m.hostCursor]
 		m.hostMode = false
-		if selectedHost == "local" {
-			return m, m.openYazi()
-		}
-		// Open remote yazi
 		return m, m.openYaziRemote(selectedHost)
 	}
 	return m, nil
@@ -731,12 +732,9 @@ func (m Model) openYazi() tea.Cmd {
 
 // openYaziRemote spawns yazi over SSH to browse a remote host
 func (m Model) openYaziRemote(host string) tea.Cmd {
-	tmpFile := "/tmp/kmux-yazi-choice-" + host
-	os.Remove(tmpFile)
-
-	// Use kitten ssh to run yazi on remote, with chooser-file writing to a remote temp file
-	// Then read the result back
-	remoteCmd := "yazi --chooser-file=/tmp/kmux-yazi-choice && cat /tmp/kmux-yazi-choice 2>/dev/null || true"
+	// Run yazi on remote with chooser-file; after exit, read the chosen path back
+	remoteChooserFile := "/tmp/kmux-yazi-choice"
+	remoteCmd := fmt.Sprintf("rm -f %s && yazi --chooser-file=%s", remoteChooserFile, remoteChooserFile)
 	cmd := exec.Command("kitten", "ssh", host, "-t", remoteCmd)
 
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
@@ -744,10 +742,14 @@ func (m Model) openYaziRemote(host string) tea.Cmd {
 			return yaziRemoteFinishedMsg{host: host, err: err}
 		}
 
-		// The path was printed to stdout by the cat command
-		// We need to capture it differently - kitten ssh may not work well with this
-		// For now, let's use a simpler approach
-		return yaziRemoteFinishedMsg{host: host, path: "", err: fmt.Errorf("remote yazi browsing requires manual path entry")}
+		// Read the chosen path from the remote
+		readCmd := exec.Command("ssh", host, "cat "+remoteChooserFile+" 2>/dev/null")
+		out, readErr := readCmd.Output()
+		path := strings.TrimSpace(string(out))
+		if readErr != nil || path == "" {
+			return yaziRemoteFinishedMsg{host: host, err: fmt.Errorf("no path selected")}
+		}
+		return yaziRemoteFinishedMsg{host: host, path: path}
 	})
 }
 
