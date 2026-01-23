@@ -17,11 +17,14 @@ var rootCmd = &cobra.Command{
 }
 
 func init() {
+	rootCmd.SetHelpFunc(styledHelp)
 	rootCmd.SetHelpCommand(&cobra.Command{
-		Use:   "help",
-		Short: "Print this help message",
+		Use:    "help",
+		Short:  "Print this help message",
+		Hidden: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return rootCmd.Help()
+			styledHelp(rootCmd, nil)
+			return nil
 		},
 	})
 }
