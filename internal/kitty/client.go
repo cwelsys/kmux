@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"strings"
 )
 
 // Client communicates with kitty via `kitty @` commands.
@@ -19,8 +21,34 @@ func NewClient() *Client {
 }
 
 // NewClientWithSocket creates a client with an explicit socket path.
+// The socket is resolved using environment and filesystem checks.
 func NewClientWithSocket(socketPath string) *Client {
-	return &Client{socketPath: socketPath}
+	return &Client{socketPath: resolveSocket(socketPath)}
+}
+
+// resolveSocket determines the actual kitty socket path.
+// Priority: KITTY_LISTEN_ON env → config path with KITTY_PID suffix → exact config path.
+func resolveSocket(configured string) string {
+	// 1. KITTY_LISTEN_ON is definitive (set by kitty in child processes)
+	if listenOn := os.Getenv("KITTY_LISTEN_ON"); listenOn != "" {
+		return strings.TrimPrefix(listenOn, "unix:")
+	}
+
+	// 2. Kitty appends -<PID> to listen_on paths; construct and verify
+	if kittyPID := os.Getenv("KITTY_PID"); kittyPID != "" {
+		pidPath := configured + "-" + kittyPID
+		if _, err := os.Stat(pidPath); err == nil {
+			return pidPath
+		}
+	}
+
+	// 3. Exact path exists (e.g. macOS --listen-on CLI flag)
+	if _, err := os.Stat(configured); err == nil {
+		return configured
+	}
+
+	// 4. Fallback to configured path as-is (error will surface from kitty)
+	return configured
 }
 
 // ParseState parses JSON output from `kitty @ ls`.
