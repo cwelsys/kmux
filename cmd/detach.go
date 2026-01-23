@@ -85,6 +85,13 @@ Use --host to specify which host's session to detach (default: auto-detect or "l
 
 		// Save session to the appropriate host
 		if host != "local" {
+			// Remote sees itself as local; CWDs from local kitty are meaningless on remote
+			session.Host = "local"
+			for i := range session.Tabs {
+				for j := range session.Tabs[i].Windows {
+					session.Tabs[i].Windows[j].CWD = ""
+				}
+			}
 			remoteClient := s.RemoteKmuxClient(host)
 			if remoteClient != nil {
 				if err := remoteClient.SaveSession(session); err != nil {
