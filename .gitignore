@@ -2,3 +2,4 @@ kmux*
 *.md
 !*README.md
 docs/
+deploy.sh

@@ -52,7 +52,13 @@ func (wc *windowCreator) createWindow(win model.Window, split SplitInfo) (int, e
 	if zmxName == "" {
 		zmxName = wc.session.ZmxSessionName(wc.tabIdx, wc.windowIdx)
 	}
-	zmxCmd := wc.zmxClient.AttachCmd(zmxName, win.Command)
+
+	// For remote sessions with a CWD but no command, start the shell in that directory
+	command := win.Command
+	if wc.zmxClient.IsRemote() && win.CWD != "" && command == "" {
+		command = "cd '" + win.CWD + "' && exec $SHELL"
+	}
+	zmxCmd := wc.zmxClient.AttachCmd(zmxName, command)
 
 	// Convert split type to kitty location
 	location := ""

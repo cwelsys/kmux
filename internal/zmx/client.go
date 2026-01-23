@@ -143,18 +143,21 @@ func (c *Client) AttachCmd(zmxName string, cmd ...string) []string {
 	zmxPath := c.zmxPath()
 
 	if c.IsRemote() {
-		// Remote: use kitten ssh to connect and run zmx
-		args := []string{"kitten", "ssh", c.host, "-t", zmxPath, "attach", zmxName}
-
-		// Add command through shell if provided
+		// Build remote command as a single string so SSH passes it
+		// intact to the remote shell (SSH flattens multiple args with spaces)
+		remoteCmd := zmxPath + " attach " + zmxName
 		for _, cm := range cmd {
 			if cm != "" {
-				// On remote, use default shell (ssh provides login shell)
-				args = append(args, "--", "sh", "-ic", cm)
+				// Double-quote the command for remote shell: protects shell
+				// operators (&&, ||, ;) while allowing $SHELL expansion
+				escaped := strings.ReplaceAll(cm, `\`, `\\`)
+				escaped = strings.ReplaceAll(escaped, `"`, `\"`)
+				escaped = strings.ReplaceAll(escaped, "`", "\\`")
+				remoteCmd += ` sh -ic "` + escaped + `"`
 				break
 			}
 		}
-		return args
+		return []string{"kitten", "ssh", "-t", c.host, remoteCmd}
 	}
 
 	// Local: direct zmx command
