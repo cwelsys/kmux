@@ -512,6 +512,10 @@ func (s *State) SessionZmxSessions(name string) ([]string, error) {
 
 // SessionZmxSessionsForHost returns the running zmx session names for a session on a specific host.
 func (s *State) SessionZmxSessionsForHost(name, host string) ([]string, error) {
+	if host != "local" {
+		return s.remoteZmxSessions(name, host)
+	}
+
 	zmxClient := s.ZmxClientForHost(host)
 	zmxSessions, err := zmxClient.List()
 	if err != nil {
@@ -545,6 +549,34 @@ func (s *State) SessionZmxSessionsForHost(name, host string) ([]string, error) {
 			continue
 		}
 		// Fall back to naming convention
+		if model.ParseZmxSessionName(zmxName) == name {
+			matches = append(matches, zmxName)
+		}
+	}
+	return matches, nil
+}
+
+// remoteZmxSessions returns zmx session names for a session on a remote host.
+// Tries remote kmux save file first, falls back to zmx list + naming convention.
+func (s *State) remoteZmxSessions(name, host string) ([]string, error) {
+	// Try to get session from remote kmux (has zmx names in save file)
+	client := s.remoteKmux[host]
+	if client != nil {
+		session, err := client.GetSession(name)
+		if err == nil && len(session.ZmxSessions) > 0 {
+			return session.ZmxSessions, nil
+		}
+	}
+
+	// Fall back to zmx list + naming convention (remote kmux might not have save file)
+	zmxClient := s.ZmxClientForHost(host)
+	zmxSessions, err := zmxClient.List()
+	if err != nil {
+		return nil, err
+	}
+
+	var matches []string
+	for _, zmxName := range zmxSessions {
 		if model.ParseZmxSessionName(zmxName) == name {
 			matches = append(matches, zmxName)
 		}
