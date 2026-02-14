@@ -82,10 +82,11 @@ func runTUI() error {
 // attachSessionWithHost handles attach logic for TUI with host support
 func attachSessionWithHost(s *state.State, name, cwd, layout, host string) error {
 	result, err := manager.AttachSession(s, manager.AttachOpts{
-		Name:   name,
-		Host:   host,
-		CWD:    cwd,
-		Layout: layout,
+		Name:         name,
+		Host:         host,
+		CWD:          cwd,
+		Layout:       layout,
+		BeforePinned: true,
 	})
 	if err != nil {
 		return err

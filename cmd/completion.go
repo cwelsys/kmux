@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"bytes"
 	"context"
 	"os"
 	"strings"
@@ -36,32 +35,21 @@ var completionCmd = &cobra.Command{
 	Short: "Generate shell completion script",
 	Long: `Generate shell completion script for kmux.
 
-For zsh, add this to your .zshrc:
-  eval "$(kmux completion zsh)"
+bash:
+  eval "$(kmux completion bash)"
 
-Or generate a file for zinit/fpath:
-  kmux completion zsh > ~/.local/share/zinit/completions/_kmux
+zsh:
+  kmux completion zsh > ~/.local/share/zsh/site-functions/_kmux
+
+fish:
+  kmux completion fish > ~/.config/fish/completions/kmux.fish
 `,
 	Args:      cobra.ExactArgs(1),
 	ValidArgs: []string{"bash", "zsh", "fish", "powershell"},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		switch args[0] {
 		case "zsh":
-			// Generate to buffer so we can remove the compdef line
-			var buf bytes.Buffer
-			if err := rootCmd.GenZshCompletion(&buf); err != nil {
-				return err
-			}
-			// Remove "compdef _kmux kmux" - the #compdef magic comment
-			// is sufficient for file-based completions in fpath
-			lines := strings.Split(buf.String(), "\n")
-			for _, line := range lines {
-				if line == "compdef _kmux kmux" {
-					continue
-				}
-				os.Stdout.WriteString(line + "\n")
-			}
-			return nil
+			return rootCmd.GenZshCompletion(os.Stdout)
 		case "bash":
 			return rootCmd.GenBashCompletion(os.Stdout)
 		case "fish":
