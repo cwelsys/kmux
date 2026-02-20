@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/cwel/kmux/internal/manager"
 	"github.com/cwel/kmux/internal/state"
 	"github.com/cwel/kmux/internal/store"
 	"github.com/spf13/cobra"
@@ -51,29 +50,7 @@ Examples:
 			host = autoDetectSessionHost(s, name)
 		}
 
-		result, err := manager.AttachSession(s, manager.AttachOpts{
-			Name:         name,
-			Host:         host,
-			CWD:          cwd,
-			Layout:       attachLayout,
-			BeforePinned: true,
-		})
-		if err != nil {
-			return err
-		}
-
-		// Print result
-		switch result.Action {
-		case "focused":
-			fmt.Printf("Focused existing session: %s\n", result.SessionName)
-		default:
-			if result.Host != "local" {
-				fmt.Printf("Attached to session: %s@%s\n", result.SessionName, result.Host)
-			} else {
-				fmt.Printf("Attached to session: %s\n", result.SessionName)
-			}
-		}
-		return nil
+		return attachSessionWithHost(s, name, cwd, attachLayout, host)
 	},
 }
 

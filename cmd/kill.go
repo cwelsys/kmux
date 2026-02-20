@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/cwel/kmux/internal/manager"
 	"github.com/cwel/kmux/internal/state"
 	"github.com/cwel/kmux/internal/store"
 	"github.com/spf13/cobra"
@@ -48,14 +47,9 @@ var killCmd = &cobra.Command{
 
 			var killed int
 			for _, name := range names {
-				if err := killSession(s, name, host); err != nil {
+				if err := killSessionWithHost(s, name, host); err != nil {
 					fmt.Printf("Failed to kill %s: %v\n", name, err)
 					continue
-				}
-				if host != "local" {
-					fmt.Printf("Killed: %s@%s\n", name, host)
-				} else {
-					fmt.Printf("Killed: %s\n", name)
 				}
 				killed++
 			}
@@ -85,14 +79,9 @@ var killCmd = &cobra.Command{
 				host = autoDetectSessionHost(s, name)
 			}
 
-			if err := killSession(s, name, host); err != nil {
+			if err := killSessionWithHost(s, name, host); err != nil {
 				fmt.Printf("Failed to kill %s: %v\n", name, err)
 				continue
-			}
-			if host != "local" {
-				fmt.Printf("Killed: %s@%s\n", name, host)
-			} else {
-				fmt.Printf("Killed: %s\n", name)
 			}
 			killed++
 		}
@@ -102,10 +91,6 @@ var killCmd = &cobra.Command{
 		}
 		return nil
 	},
-}
-
-func killSession(s *state.State, name, host string) error {
-	return manager.KillSession(s, manager.KillOpts{Name: name, Host: host})
 }
 
 func init() {
