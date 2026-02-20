@@ -103,17 +103,45 @@ func (c *Client) wrapErr(subcmd string, err error, stderr string) error {
 // In kitten mode: kitten @ <args...>
 // In socket mode: kitty @ [--to unix:<socket>] <args...>
 func (c *Client) kittyCmd(args ...string) *exec.Cmd {
+	var cmd *exec.Cmd
 	if c.useKitten {
 		fullArgs := append([]string{"@"}, args...)
-		return exec.Command(c.kittenPath, fullArgs...)
+		cmd = exec.Command(c.kittenPath, fullArgs...)
+	} else {
+		fullArgs := []string{"@"}
+		if c.socketPath != "" {
+			fullArgs = append(fullArgs, "--to", "unix:"+c.socketPath)
+		}
+		fullArgs = append(fullArgs, args...)
+		cmd = exec.Command("kitty", fullArgs...)
 	}
+	// Clear env vars that cause kitten to run as an SSH askpass helper
+	// instead of a remote control client. These get inherited when kmux
+	// is launched via --copy-env from a window running kitten ssh.
+	cmd.Env = sanitizeKittyEnv()
+	return cmd
+}
 
-	fullArgs := []string{"@"}
-	if c.socketPath != "" {
-		fullArgs = append(fullArgs, "--to", "unix:"+c.socketPath)
+// sanitizeKittyEnv returns the current environment with kitten ssh askpass
+// variables removed. When kitty @ delegates to kitten (kitty 0.45+), these
+// vars cause kitten to act as an SSH askpass helper instead of processing
+// the remote control command, hanging indefinitely.
+func sanitizeKittyEnv() []string {
+	var env []string
+	for _, e := range os.Environ() {
+		key := e[:strings.IndexByte(e, '=')]
+		switch key {
+		case "KITTY_KITTEN_RUN_MODULE",
+			"SSH_ASKPASS",
+			"SSH_ASKPASS_REQUIRE",
+			"KITTY_SSH_ASKPASS_OVERRIDES",
+			"KITTY_SSH_ASKPASS_USER",
+			"KITTY_SSH_ASKPASS_HOST":
+			continue
+		}
+		env = append(env, e)
 	}
-	fullArgs = append(fullArgs, args...)
-	return exec.Command("kitty", fullArgs...)
+	return env
 }
 
 // ParseState parses JSON output from `kitty @ ls`.
